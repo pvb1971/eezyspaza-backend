@@ -15,6 +15,7 @@ app.post("/pay", async (req, res) => {
   }
 
   try {
+    console.log("🔍 Sending payment request to Yoco with amount:", amount);
     const response = await axios.post(
       "https://online.yoco.com/v1/once_off_payment_links/",
       {
@@ -29,14 +30,16 @@ app.post("/pay", async (req, res) => {
       }
     );
 
+    console.log("✅ Yoco response:", response.data);
     const checkoutUrl = response.data?.redirectUrl;
+
     if (!checkoutUrl) {
       throw new Error("Missing redirectUrl in response");
     }
 
     res.json({ checkoutUrl });
   } catch (error) {
-    console.error("Yoco Payment Error:", error.response?.data || error.message);
+    console.error("❌ Yoco Payment Error:", error.response?.data || error.message);
     res.status(500).json({ error: "Payment failed" });
   }
 });
