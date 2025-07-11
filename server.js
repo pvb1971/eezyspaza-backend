@@ -1,37 +1,25 @@
-const express = require('express');
-const bodyParser = require('body-parser');
-require('dotenv').config();
-const axios = require('axios');
+const express = require("express");
+const bodyParser = require("body-parser");
+const dotenv = require("dotenv");
+const axios = require("axios");
+
+dotenv.config();
 
 const app = express();
 app.use(bodyParser.json());
 
-const PORT = 3000;
-
-app.post('/pay', async (req, res) => {
-  const { token, amountInCents } = req.body;
-
-  try {
-    const response = await axios.post(
-      'https://online.yoco.com/v1/charges/',
-      {
-        token,
-        amountInCents,
-        currency: 'ZAR'
-      },
-      {
-        headers: {
-          'X-Secret-Key': process.env.YOCO_SECRET_KEY
-        }
-      }
-    );
-
-    res.json({ message: '✅ Payment successful!' });
-  } catch (error) {
-    res.status(500).json({ message: '❌ Payment failed.', error: error.message });
-  }
+// ✅ Health check route
+app.get("/", (req, res) => {
+  res.send("Eezy Spaza backend is running!");
 });
 
+// Your /pay route (and others) below
+app.post("/pay", async (req, res) => {
+  // your Yoco payment logic
+});
+
+// Start the server
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
