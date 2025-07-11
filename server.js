@@ -1,47 +1,46 @@
-require('dotenv').config();
-const express = require('express');
-const bodyParser = require('body-parser');
-const axios = require('axios');
+const express = require("express");
+const bodyParser = require("body-parser");
+const dotenv = require("dotenv");
+const axios = require("axios");
 
+dotenv.config();
 const app = express();
-const PORT = process.env.PORT || 3000;
-
 app.use(bodyParser.json());
 
-// ✅ Yoco /pay route
-app.post('/pay', async (req, res) => {
-  const amount = req.body.amount;
+app.post("/pay", async (req, res) => {
+  const { amount } = req.body;
+
+  if (!amount || typeof amount !== "number") {
+    return res.status(400).json({ error: "Invalid or missing amount" });
+  }
 
   try {
     const response = await axios.post(
-      'https://online.yoco.com/v1/checkout/session',
+      "https://online.yoco.com/v1/charges/",
       {
-        amount,
-        currency: 'ZAR',
-        name: 'Eezy Spaza',
-        description: 'Your purchase',
-        redirect_url: 'https://eezyspaza.com/success' // or any valid URL
+        amountInCents: amount,
+        currency: "ZAR",
       },
       {
         headers: {
-          'X-Auth-Secret-Key': process.env.YOCO_SECRET_KEY,
-          'Content-Type': 'application/json'
-        }
+          "X-Auth-Secret-Key": process.env.YOCO_SECRET_KEY,
+          "Content-Type": "application/json",
+        },
       }
     );
 
-    res.json({ checkoutUrl: response.data.checkout_url });
+    res.json({ checkoutUrl: response.data.redirect_url });
   } catch (error) {
-    console.error('Yoco API error:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to create Yoco payment session' });
+    console.error("Payment error:", error.response?.data || error.message);
+    res.status(500).json({ error: "Payment failed" });
   }
 });
 
-// ✅ Root route for testing
-app.get('/', (req, res) => {
-  res.send('Eezy Spaza backend is running.');
+app.get("/", (req, res) => {
+  res.send("Eezy Spaza backend is running!");
 });
 
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
