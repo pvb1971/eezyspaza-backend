@@ -1,12 +1,3 @@
-const express = require("express");
-const bodyParser = require("body-parser");
-const dotenv = require("dotenv");
-const axios = require("axios");
-
-dotenv.config();
-const app = express();
-app.use(bodyParser.json());
-
 app.post("/pay", async (req, res) => {
   const { amount } = req.body;
 
@@ -31,16 +22,7 @@ app.post("/pay", async (req, res) => {
 
     res.json({ checkoutUrl: response.data.redirect_url });
   } catch (error) {
-    console.error("Payment error:", error.response?.data || error.message);
+    console.error("Yoco Payment Error:", error.response?.data || error.message);
     res.status(500).json({ error: "Payment failed" });
   }
-});
-
-app.get("/", (req, res) => {
-  res.send("Eezy Spaza backend is running!");
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
 });
