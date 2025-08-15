@@ -1,0 +1,26 @@
+{
+  "name": "eezyspaza-backend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "axios": "^1.11.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.1",
+    "express": "^4.21.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pvb1971/eezyspaza-backend.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/pvb1971/eezyspaza-backend/issues"
+  },
+  "homepage": "https://github.com/pvb1971/eezyspaza-backend#readme",
+  "description": ""
+}
