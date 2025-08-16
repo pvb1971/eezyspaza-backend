@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment Confirmation</title>
+    <link rel="stylesheet" href="file:///android_asset/style.css">
+    <style>
+        .confirmation-container {
+            text-align: center;
+            padding: 40px 20px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            margin: 30px auto;
+            max-width: 600px;
+        }
+        .confirmation-container h1 {
+            font-size: 2em;
+            margin-bottom: 15px;
+        }
+        .confirmation-container p {
+            font-size: 1.1em;
+            color: #555;
+            margin-bottom: 20px;
+        }
+        .success h1 { color: #2ecc71; }
+        .failed h1 { color: #e74c3c; }
+        .cancelled h1 { color: #f39c12; }
+        .error h1 { color: #e74c3c; }
+
+        .order-details span {
+            font-weight: bold;
+        }
+        .home-button {
+            display: inline-block;
+            margin-top: 30px;
+            padding: 12px 30px;
+            background-color: #3498db;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-size: 1em;
+        }
+        .home-button:hover {
+            background-color: #2980b9;
+        }
+    </style>
+</head>
+<body>
+<nav class="navbar"> <!-- Optional: Keep navbar consistent -->
+    <a href="index.html">Home</a>
+    <a href="groceries.html">Groceries</a>
+    <!-- <a href="trolley.html" class="view-trolley">🛒</a> --> <!-- Trolley likely empty now -->
+</nav>
+
+<div id="confirmationContainer" class="confirmation-container">
+    <h1>Processing...</h1>
+    <p id="confirmationMessage"></p>
+    <div id="orderDetails" class="order-details" style="display:none;">
+        <p>Order ID: <span id="displayOrderId"></span></p>
+        <p>Reference: <span id="displayRef"></span></p>
+    </div>
+    <a href="index.html" class="home-button">Back to Home</a>
+</div>
+
+<script src="file:///android_asset/payment_confirmation.js"></script>
+</html>

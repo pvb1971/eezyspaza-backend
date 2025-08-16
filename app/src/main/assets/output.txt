@@ -1,0 +1,7 @@
+
+D:\AndroidProjects\ChatGPTEezySpaza\app\src\main\assets>(echo === output.txt ===   & type "output.txt"   & echo.) 
+=== output.txt === 
+
+D:\AndroidProjects\ChatGPTEezySpaza\app\src\main\assets>(echo === output.txt ===   & type "output.txt"   & echo.) 
+=== output.txt === 
+

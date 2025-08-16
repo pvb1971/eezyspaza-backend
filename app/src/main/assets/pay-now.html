@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pay Now with Yoco</title>
+  <script src="https://js.yoco.com/sdk/v1/yoco-sdk-web.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      padding: 30px;
+      background-color: #f4f4f4;
+      color: #333;
+    }
+    .payment-container {
+        background-color: #fff;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        display: inline-block;
+    }
+    #card-frame {
+      margin: 20px auto;
+      width: 100%; /* Make it responsive within container */
+      max-width: 320px; /* Max width for the card frame */
+      height: 40px; /* Adjust as per Yoco's default or styling */
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    #checkout-button {
+      background-color: #007bff;
+      color: white;
+      padding: 12px 25px;
+      font-size: 1.1em;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+    #checkout-button:hover {
+      background-color: #0056b3;
+    }
+    #checkout-button:disabled {
+      background-color: #ccc;
+      cursor: not-allowed;
+    }
+    .amount-display {
+        font-size: 1.5em;
+        margin-bottom: 15px;
+        color: #555;
+    }
+  </style>
+</head>
+<body>
+<div class="payment-container">
+  <h2>Secure Payment</h2>
+  <div class="amount-display">
+    Total: R<span id="displayAmount">0.00</span>
+  </div>
+  <p>Please enter your card details below:</p>
+  <!-- Yoco's inline frame will be mounted here -->
+  <div id="card-frame"></div>
+  <button id="checkout-button">Pay Now</button>
+</div>
+
+<!-- Load the revised pay-now.js -->
+<script src="file:///android_asset/pay-now.js"></script>
+</body>
+</html>

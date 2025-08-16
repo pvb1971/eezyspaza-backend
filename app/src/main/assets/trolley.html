@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EezySpaza - Trolley</title>
+    <link rel="stylesheet" href="trolley.css">
+    <!-- If groceries.js is ONLY for updating navbar count from other pages,
+         trolley.js should ideally handle its own count.
+         For now, keeping it but deferring trolley.js is important. -->
+    <script src="groceries.js"></script>
+    <script src="trolley.js" defer></script>
+</head>
+<body>
+<nav class="navbar">
+    <a href="index.html">Home</a>
+    <a href="groceries.html">Groceries</a>
+    <a href="butchery.html">Butchery</a>
+    <a href="bakery.html">Bakery</a>
+    <a href="hardware.html">Hardware</a>
+    <a href="trolley.html" class="view-trolley">🛒 <span id="trolleyCount">0</span></a>
+</nav>
+<main>
+    <h1>Your Trolley</h1>
+    <div id="trolleyItemsContainer">
+        <!-- Trolley items will be dynamically inserted here by trolley.js -->
+        <p>Loading trolley...</p> <!-- Initial message -->
+    </div>
+    <div class="trolley-totals">
+        <p>Subtotal: <span id="trolleySubtotal">R0.00</span></p>
+        <p>VAT (15%): <span id="trolleyVat">R0.00</span></p>
+        <p>Total: <span id="trolleyTotal">R0.00</span></p>
+    </div>
+    <button id="clearTrolleyButton">Clear Trolley</button>
+    <button id="checkoutButton">Proceed to Checkout</button>
+</main>
+<footer>
+    <p>&copy; 2025 EezySpaza. All rights reserved.</p>
+</footer>
+</body>
+</html>

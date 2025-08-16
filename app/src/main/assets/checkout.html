@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Checkout - EezySpaza</title>
+    <!-- Link to your CSS if you have one for checkout -->
+    <link rel="stylesheet" href="style.css"> <!-- Or your specific checkout.css -->
+    <script src="checkout.js" defer></script>
+</head>
+<body>
+<nav class="navbar"> <!-- Assuming you have a standard navbar -->
+    <a href="index.html">Home</a>
+    <a href="trolley.html">Back to Trolley</a>
+</nav>
+
+<main class="checkout-container">
+    <h1>Confirm Your Order & Pay</h1>
+
+    <!-- Optional: Display Subtotal, VAT -->
+    <!--
+    <div class="order-summary-details">
+        <p>Subtotal: <span id="subtotal-display">Loading...</span></p>
+        <p>VAT (15%): <span id="vat-display">Loading...</span></p>
+    </div>
+    -->
+
+    <!-- Optional: Display list of items -->
+    <!--
+    <div id="items-summary" class="items-summary-container">
+        <p>Loading items...</p>
+    </div>
+    -->
+
+    <div class="total-payable-section">
+        <h2>Total Payable: <span id="total-display">R0.00</span></h2>
+    </div>
+
+    <button id="pay-now" class="pay-now-button">Pay Now</button>
+
+    <div id="payment-status" class="payment-status-message">
+        <!-- Payment messages can appear here -->
+    </div>
+</main>
+
+<footer>
+    <p>&copy; 2025 EezySpaza. All rights reserved.</p>
+</footer>
+
+</body>
+</html>

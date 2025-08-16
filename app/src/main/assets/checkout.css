@@ -1,0 +1,53 @@
+/* checkout.css */
+.navbar {
+    display: flex;
+    justify-content: space-around;
+    padding: 10px;
+    background-color: #f8f8f8;
+    border-bottom: 1px solid #ddd;
+}
+.navbar a {
+    text-decoration: none;
+    color: #333;
+}
+.view-trolley {
+    display: flex;
+    align-items: center;
+}
+#trolleyCount {
+    background-color: #ff0000;
+    color: white;
+    border-radius: 50%;
+    padding: 2px 6px;
+    margin-left: 5px;
+}
+main {
+    padding: 20px;
+}
+.order-item-card {
+    display: flex;
+    align-items: center;
+    padding: 10px;
+    border-bottom: 1px solid #ddd;
+}
+.order-item-image {
+    width: 100px;
+    height: auto;
+    margin-right: 15px;
+}
+.order-item-details {
+    flex: 1;
+}
+.order-totals {
+    margin-top: 20px;
+    text-align: right;
+}
+#confirmOrderButton {
+    padding: 10px 20px;
+    margin: 10px;
+    cursor: pointer;
+}
+#confirmOrderButton:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}

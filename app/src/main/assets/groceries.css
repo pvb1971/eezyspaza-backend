@@ -1,0 +1,207 @@
+/* Reset and base styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: Arial, sans-serif;
+}
+
+body {
+    background-color: #f5f5f5;
+    padding-top: 50px; /* Space for fixed navbar */
+    padding-left: 10px; /* Overall horizontal padding for the page content */
+    padding-right: 10px; /* Overall horizontal padding for the page content */
+}
+
+/* Navigation Bar */
+.navbar {
+    position: fixed;
+    top: 0;
+    left: 0; /* Ensures it spans full width starting from left */
+    width: 100%;
+    background-color: #333;
+    padding: 8px;
+    z-index: 1000;
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+}
+
+.navbar a {
+    color: #fff;
+    text-decoration: none;
+    font-size: 11px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    transition: background-color 0.2s ease;
+}
+
+.navbar a:hover {
+    background-color: #555;
+}
+
+/* Product Container - For viewports wider than 360px */
+.product-container {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr); /* Key for two equal columns */
+    gap: 15px; /* Spacing between cards */
+    padding: 15px; /* Padding inside the container, around the grid of cards */
+    width: 100%; /* Make the container use the available width within body padding */
+    max-width: 900px; /* Optional: Constrain max width on very large screens */
+    margin: 20px auto; /* Centering the container and adding top/bottom margin */
+}
+
+/* Product Card - For viewports wider than 360px */
+.product-card {
+    background-color: #fff;
+    border-radius: 6px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    padding: 10px; /* Internal padding for card content */
+    text-align: center;
+    min-height: 160px; /* Adjust as needed, 'auto' is also an option */
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: transform 0.2s ease;
+    /* No explicit width here - it will fill its grid cell */
+}
+
+.product-card:hover {
+    transform: translateY(-3px);
+}
+
+.product-card img {
+    width: 90px; /* Or adjust as needed */
+    height: 90px; /* Or adjust as needed */
+    max-width: 100%; /* Ensures image doesn't overflow its container if it's intrinsically larger */
+    object-fit: cover;
+    border-radius: 4px;
+    margin: 0 auto 8px auto; /* Center image and add bottom margin */
+}
+
+.product-card h3 {
+    font-size: 11px;
+    font-weight: bold;
+    color: #333;
+    margin: 5px 0;
+    line-height: 1.2;
+}
+
+.product-card .description {
+    font-size: 9px;
+    color: #666;
+    margin-bottom: 5px;
+    line-height: 1.2;
+    flex-grow: 1; /* Allows description to take up available space, helping align buttons */
+}
+
+.product-card .price {
+    font-size: 11px;
+    font-weight: bold;
+    color: #e44d26;
+    margin-bottom: 8px;
+}
+
+.product-card .add-to-trolley {
+    width: 100%;
+    padding: 6px;
+    background-color: #e44d26;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    font-size: 10px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.product-card .add-to-trolley:hover {
+    background-color: #c73e1d;
+}
+
+/* View Trolley Button (Cart icon in navbar) */
+.view-trolley {
+    position: fixed; /* Fixed relative to the viewport */
+    top: 6px; /* Align with navbar items, adjust as needed */
+    right: 15px; /* Space from the right edge */
+    background-color: #28a745;
+    color: #fff;
+    padding: 7px 10px; /* Adjusted padding to better match navbar links height */
+    border-radius: 4px;
+    text-decoration: none;
+    font-size: 11px; /* Match navbar link font size */
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    transition: background-color 0.2s ease;
+    z-index: 1001; /* Ensure it's above navbar if navbar has lower z-index and they overlap */
+}
+
+.view-trolley:hover {
+    background-color: #218838;
+}
+
+/* View Trolley Button (Floating Action Button style at the bottom) */
+.view-trolley-button {
+    position: fixed;
+    bottom: 12px;
+    right: 12px;
+    background-color: #28a745;
+    color: #fff;
+    padding: 10px 14px;
+    font-size: 12px;
+    font-weight: bold;
+    border: none;
+    border-radius: 24px; /* More circular */
+    text-decoration: none;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+    transition: background-color 0.2s ease;
+}
+
+.view-trolley-button:hover {
+    background-color: #218838;
+}
+
+/* Responsive Design - For screens 360px wide or less */
+@media (max-width: 360px) {
+    body {
+         padding-left: 5px;  /* Reduce body padding for small screens */
+         padding-right: 5px; /* Reduce body padding for small screens */
+    }
+
+    .product-container {
+        grid-template-columns: 1fr; /* Single column layout */
+        gap: 10px; /* Adjust gap for single column */
+        padding: 10px; /* Adjust padding for single column */
+    }
+
+    /* Product card styles for small screens (if different from above) */
+    /* Often, no specific .product-card width is needed here either,
+       as it will fill the 1fr column by default.
+       The min-height and padding from the general .product-card rule still apply.
+    */
+
+    .product-card img {
+        width: 80px; /* Slightly smaller image for smaller cards */
+        height: 80px;
+    }
+
+    .product-card h3,
+    .product-card .price {
+        font-size: 10px; /* Adjust font size for smaller cards */
+    }
+
+    .product-card .description,
+    .product-card .add-to-trolley {
+        font-size: 8px; /* Adjust font size for smaller cards */
+    }
+
+    .navbar a { /* Adjust navbar links for smaller screens */
+        font-size: 10px;
+        padding: 4px 6px;
+    }
+    .view-trolley { /* Adjust fixed cart icon in navbar for smaller screens */
+        font-size: 10px;
+        padding: 4px 6px;
+        top: 8px; /* May need slight repositioning with smaller navbar items */
+        right: 8px;
+    }
+}
