@@ -141,13 +141,17 @@ app.post('/yoco-webhook-receiver',
        }
    }),
 
-   // Inside your /yoco-webhook-receiver route
-   async (req, res) => {
-       console.log("-----> FULL /yoco-webhook-receiver ROUTE HIT <-----");
-       console.log('RECEIVED YOCO WEBHOOK:', JSON.stringify(req.body, null, 2));
-       
-       // ... rest of your code
+  // In your /yoco-webhook-receiver route, inside the async function
+async (req, res) => {
+    console.log("-----> FULL /yoco-webhook-receiver ROUTE HIT <-----");
+    // This log will print the raw request body.
+    // It's crucial for debugging webhook issues.
+    console.log("RAW WEBHOOK BODY:", req.rawBody ? req.rawBody.toString() : "No raw body found.");
+    console.log("PARSED WEBHOOK BODY:", req.body ? JSON.stringify(req.body, null, 2) : "No parsed body found.");
 
+    const event = req.body;
+    // ... rest of your code
+}
        if (!YOCO_WEBHOOK_SECRET) {
           console.error("CRITICAL (Webhook): YOCO_WEBHOOK_SECRET environment variable is not set. Cannot verify signature.");
           return res.status(500).send('Server configuration error: Webhook processing unavailable.');
