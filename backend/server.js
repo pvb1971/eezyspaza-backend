@@ -6,7 +6,7 @@ const crypto = require('crypto'); // For webhook signature verification
 require('dotenv').config();
 
 const admin = require('firebase-admin');
-const serviceAccount = require('./eezy-spaza-4a8858965d70.json');
+const serviceAccount = require('./eezy-spaza-4a8858965d70.json'); // Ensure this path is correct or replaced by Render Secret File
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
@@ -129,6 +129,8 @@ app.post('/create-checkout', express.json(), async (req, res) => {
    }
 });
 
+---
+
 // ========================================================================= //
 // == YOCO WEBHOOK RECEIVER (SERVER-TO-SERVER PAYMENT CONFIRMATION)       == //
 // ========================================================================= //
@@ -142,8 +144,6 @@ app.post('/yoco-webhook-receiver',
    }),
    async (req, res) => {
        console.log("-----> FULL /yoco-webhook-receiver ROUTE HIT <-----");
-       // This log will print the raw request body.
-       // It's crucial for debugging webhook issues.
        console.log("RAW WEBHOOK BODY:", req.rawBody ? req.rawBody.toString() : "No raw body found.");
        console.log("PARSED WEBHOOK BODY:", req.body ? JSON.stringify(req.body, null, 2) : "No parsed body found.");
 
@@ -156,54 +156,42 @@ app.post('/yoco-webhook-receiver',
           return res.status(500).send('Server configuration error: Webhook secret format incorrect.');
        }
  
-       // ... (the rest of your webhook handling logic) ...
-   }
-);
-       if (!YOCO_WEBHOOK_SECRET) {
-          console.error("CRITICAL (Webhook): YOCO_WEBHOOK_SECRET environment variable is not set. Cannot verify signature.");
-          return res.status(500).send('Server configuration error: Webhook processing unavailable.');
-       }
-       if (!YOCO_WEBHOOK_SECRET.startsWith('whsec_')) {
-          console.error(`CRITICAL (Webhook): YOCO_WEBHOOK_SECRET format is incorrect. Expected 'whsec_...' but got '${YOCO_WEBHOOK_SECRET.substring(0,10)}...'`);
-          return res.status(500).send('Server configuration error: Webhook secret format incorrect.');
-       }
-
        const yocoWebhookId = req.headers['webhook-id'];
        const yocoTimestampHeader = req.headers['webhook-timestamp'];
        const yocoSignatureHeader = req.headers['webhook-signature'];
-
+ 
        if (!yocoWebhookId || !yocoTimestampHeader || !yocoSignatureHeader) {
           console.error("(Webhook) Missing one or more required Yoco headers: webhook-id, webhook-timestamp, or webhook-signature.");
           return res.status(400).send('Missing required Yoco webhook headers.');
        }
-
+ 
        const webhookTimestamp = parseInt(yocoTimestampHeader, 10);
        const currentTimestamp = Math.floor(Date.now() / 1000);
        const threeMinutesInSeconds = 3 * 60;
-
+ 
        if (Math.abs(currentTimestamp - webhookTimestamp) > threeMinutesInSeconds) {
           console.warn(`(Webhook) Timestamp [${webhookTimestamp}] outside tolerance compared to current time [${currentTimestamp}].`);
           return res.status(400).send('Timestamp validation failed (outside tolerance).');
        }
-
+ 
        try {
           if (!req.rawBody) {
              console.error("CRITICAL (Webhook): req.rawBody is not defined.");
              return res.status(500).send('Internal server error: Raw body missing for signature check.');
           }
-
+ 
           const signedContent = `${yocoWebhookId}.${yocoTimestampHeader}.${req.rawBody}`;
           const secretWithoutPrefix = YOCO_WEBHOOK_SECRET.substring('whsec_'.length);
           const secretBytes = Buffer.from(secretWithoutPrefix, 'base64');
-
+ 
           const calculatedSignature = crypto
               .createHmac('sha256', secretBytes)
               .update(signedContent)
               .digest('base64');
-
+ 
           const signatureHeaderValue = yocoSignatureHeader;
           let signatureFromHeader = null;
-
+ 
           if (signatureHeaderValue.startsWith('v1,')) {
              signatureFromHeader = signatureHeaderValue.substring('v1,'.length);
           } else {
@@ -215,22 +203,22 @@ app.post('/yoco-webhook-receiver',
                }
              }
           }
-
+ 
           if (!signatureFromHeader) {
              console.error("(Webhook) Could not extract 'v1' signature from webhook-signature header:", signatureHeaderValue);
              return res.status(400).send('Invalid signature header format (v1 signature not found).');
           }
-
+ 
           const calculatedSigBuffer = Buffer.from(calculatedSignature, 'base64');
           const headerSigBuffer = Buffer.from(signatureFromHeader, 'base64');
-
+ 
           if (calculatedSigBuffer.length !== headerSigBuffer.length) {
              console.error("(Webhook) Signature length mismatch. Calculated vs Header.");
              return res.status(403).send('Invalid signature (length mismatch).');
           }
-
+ 
           const isSignatureValid = crypto.timingSafeEqual(calculatedSigBuffer, headerSigBuffer);
-
+ 
           if (!isSignatureValid) {
              console.error("CRITICAL (Webhook): Invalid webhook signature.");
              return res.status(403).send('Invalid signature.'); // 403 Forbidden
@@ -265,13 +253,15 @@ app.post('/yoco-webhook-receiver',
           
           // Always send a 200 OK to Yoco to acknowledge receipt
           res.status(200).send('Webhook received and processed.');
-
+ 
        } catch (error) {
           console.error("Webhook processing error:", error.message);
           res.status(500).send('Webhook processing error.');
        }
    }
 );
+
+---
 
 // Health check endpoint
 app.get('/health', (req, res) => {
