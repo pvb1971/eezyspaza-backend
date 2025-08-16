@@ -223,5 +223,7 @@ app.post('/yoco-webhook-receiver',
  
           const isSignatureValid = crypto.timingSafeEqual(calculatedSigBuffer, headerSigBuffer);
  
-          if (!isSignatureValid) {
-             console.error
+        if (!isSignatureValid) {
+                console.error("CRITICAL (Webhook): Invalid webhook signature.");
+                return res.status(403).send('Invalid signature.'); // 403 Forbidden
+           }
