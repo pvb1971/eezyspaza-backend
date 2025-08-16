@@ -6,7 +6,7 @@ const crypto = require('crypto'); // For webhook signature verification
 require('dotenv').config();
 
 const admin = require('firebase-admin');
-const serviceAccount = require('./eezy-spaza-4a8858965d70.json'); // Ensure this path is correct or replaced by Render Secret File
+const serviceAccount = require('./eezy-spaza-4a8858965d70.json');
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
@@ -129,7 +129,6 @@ app.post('/create-checkout', express.json(), async (req, res) => {
    }
 });
 
----
 
 // ========================================================================= //
 // == YOCO WEBHOOK RECEIVER (SERVER-TO-SERVER PAYMENT CONFIRMATION)       == //
@@ -261,7 +260,6 @@ app.post('/yoco-webhook-receiver',
    }
 );
 
----
 
 // Health check endpoint
 app.get('/health', (req, res) => {
