@@ -140,9 +140,14 @@ app.post('/yoco-webhook-receiver',
            }
        }
    }),
+
+   // Inside your /yoco-webhook-receiver route
    async (req, res) => {
        console.log("-----> FULL /yoco-webhook-receiver ROUTE HIT <-----");
+       console.log('RECEIVED YOCO WEBHOOK:', JSON.stringify(req.body, null, 2));
        
+       // ... rest of your code
+
        if (!YOCO_WEBHOOK_SECRET) {
           console.error("CRITICAL (Webhook): YOCO_WEBHOOK_SECRET environment variable is not set. Cannot verify signature.");
           return res.status(500).send('Server configuration error: Webhook processing unavailable.');
