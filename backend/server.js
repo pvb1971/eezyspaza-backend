@@ -129,7 +129,6 @@ app.post('/create-checkout', express.json(), async (req, res) => {
    }
 });
 
-
 // ========================================================================= //
 // == YOCO WEBHOOK RECEIVER (SERVER-TO-SERVER PAYMENT CONFIRMATION)       == //
 // ========================================================================= //
@@ -224,26 +223,56 @@ app.post('/yoco-webhook-receiver',
           }
           
           // Webhook Signature is valid - proceed to process the payload
-         const event = req.body;
-const eventType = event.type;
-const payload = event.payload;
+          const event = req.body;
+          const eventType = event.type;
+          const payload = event.payload;
 
-const orderIdFromMetadata = payload.metadata ? payload.metadata.firebase_order_id : null;
-const paymentId = payload.id;
-
-console.log(`(Webhook) Processing event type: ${eventType}. Firebase Order ID: ${orderIdFromMetadata}.`);
+          const orderIdFromMetadata = payload.metadata ? payload.metadata.firebase_order_id : null;
+          const paymentId = payload.id;
+          
+          console.log(`(Webhook) Processing event type: ${eventType}. Firebase Order ID: ${orderIdFromMetadata}.`);
           
           if (orderIdFromMetadata && paymentId) {
              const orderRef = db.collection('orders').doc(orderIdFromMetadata);
              
-             if (event.event === 'payment.succeeded') {
-                 await orderRef.update({
-                     yocoPaymentId: paymentId,
-                     status: 'payment_succeeded',
-                     updatedAt: admin.firestore.FieldValue.serverTimestamp()
+             if (eventType === 'payment.succeeded') {
+                 
+                 // --- NEW INVENTORY LOGIC START ---
+                 const orderItems = JSON.parse(payload.metadata.items);
+                 
+                 await db.runTransaction(async (transaction) => {
+                     const orderDoc = await transaction.get(orderRef);
+                     if (orderDoc.data().status === 'payment_succeeded') {
+                         console.log(`(Webhook) Order ${orderIdFromMetadata} already processed. Skipping inventory update.`);
+                         return;
+                     }
+                     
+                     for (const item of orderItems) {
+                         const productRef = db.collection('products').doc(item.id);
+                         const productDoc = await transaction.get(productRef);
+                         
+                         const currentStock = productDoc.data().quantity;
+                         const newStock = currentStock - item.quantity;
+                         
+                         if (newStock < 0) {
+                             throw new Error(`Insufficient stock for product ${item.id}.`);
+                         }
+                         
+                         transaction.update(productRef, { quantity: newStock });
+                         console.log(`(Webhook) Updated stock for product ${item.id} from ${currentStock} to ${newStock}.`);
+                     }
+                     
+                     // Update the order status inside the transaction to ensure atomicity
+                     transaction.update(orderRef, {
+                         yocoPaymentId: paymentId,
+                         status: 'payment_succeeded',
+                         updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                     });
                  });
-                 console.log(`(Webhook) Updated order ${orderIdFromMetadata} to 'payment_succeeded'.`);
-             } else if (event.event === 'payment.failed' || event.event === 'payment.cancelled') {
+                 console.log(`(Webhook) Inventory and order updated for order ${orderIdFromMetadata}.`);
+                 // --- NEW INVENTORY LOGIC END ---
+ 
+             } else if (eventType === 'payment.failed' || eventType === 'payment.cancelled') {
                  await orderRef.update({
                      yocoPaymentId: paymentId,
                      status: 'payment_failed',
@@ -262,7 +291,6 @@ console.log(`(Webhook) Processing event type: ${eventType}. Firebase Order ID: $
        }
    }
 );
-
 
 // Health check endpoint
 app.get('/health', (req, res) => {
