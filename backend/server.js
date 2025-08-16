@@ -140,18 +140,25 @@ app.post('/yoco-webhook-receiver',
            }
        }
    }),
+   async (req, res) => {
+       console.log("-----> FULL /yoco-webhook-receiver ROUTE HIT <-----");
+       // This log will print the raw request body.
+       // It's crucial for debugging webhook issues.
+       console.log("RAW WEBHOOK BODY:", req.rawBody ? req.rawBody.toString() : "No raw body found.");
+       console.log("PARSED WEBHOOK BODY:", req.body ? JSON.stringify(req.body, null, 2) : "No parsed body found.");
 
-  // In your /yoco-webhook-receiver route, inside the async function
-async (req, res) => {
-    console.log("-----> FULL /yoco-webhook-receiver ROUTE HIT <-----");
-    // This log will print the raw request body.
-    // It's crucial for debugging webhook issues.
-    console.log("RAW WEBHOOK BODY:", req.rawBody ? req.rawBody.toString() : "No raw body found.");
-    console.log("PARSED WEBHOOK BODY:", req.body ? JSON.stringify(req.body, null, 2) : "No parsed body found.");
-
-    const event = req.body;
-    // ... rest of your code
-}
+       if (!YOCO_WEBHOOK_SECRET) {
+          console.error("CRITICAL (Webhook): YOCO_WEBHOOK_SECRET environment variable is not set. Cannot verify signature.");
+          return res.status(500).send('Server configuration error: Webhook processing unavailable.');
+       }
+       if (!YOCO_WEBHOOK_SECRET.startsWith('whsec_')) {
+          console.error(`CRITICAL (Webhook): YOCO_WEBHOOK_SECRET format is incorrect. Expected 'whsec_...' but got '${YOCO_WEBHOOK_SECRET.substring(0,10)}...'`);
+          return res.status(500).send('Server configuration error: Webhook secret format incorrect.');
+       }
+ 
+       // ... (the rest of your webhook handling logic) ...
+   }
+);
        if (!YOCO_WEBHOOK_SECRET) {
           console.error("CRITICAL (Webhook): YOCO_WEBHOOK_SECRET environment variable is not set. Cannot verify signature.");
           return res.status(500).send('Server configuration error: Webhook processing unavailable.');
