@@ -115,22 +115,25 @@ app.post('/create-checkout', express.json(), async (req, res) => {
            redirectUrl: checkoutData.redirectUrl,
            checkoutId: yocoCheckoutId
        });
+// ... (code above) ...
+
    } catch (error) {
-       console.error('Error creating Yoco checkout:', error.response ? error.response.data : error.message);
-       // **CORRECTION:** Update the Firebase order status to 'failed' if the Yoco call fails
-       if (newOrderFirebaseId) {
-         await db.collection('orders').doc(newOrderFirebaseId).update({
-           status: 'checkout_failed',
-           errorMessage: error.response ? JSON.stringify(error.response.data) : error.message
-         }).catch(e => console.error("Error updating order status after Yoco failure:", e));
+       console.error('Error creating Yoco checkout:');
+       if (error.response) {
+           console.error('Yoco API Error Status:', error.response.status);
+           console.error('Yoco API Error Data:', JSON.stringify(error.response.data, null, 2));
+           res.status(error.response.status || 500).json({
+                success: false,
+                message: 'Failed to create checkout with Yoco.',
+                details: error.response.data
+           });
+       } else {
+           console.error('Network/Request Error:', error.message);
+           res.status(500).json({ success: false, message: 'Internal server error during checkout creation.' });
        }
-       res.status(error.response?.status || 500).json({
-           success: false,
-           message: 'Failed to create checkout with Yoco.',
-           details: error.response?.data || { error: error.message }
-       });
    }
-});
+ 
+// ... (code below) ...
  
 // ... (rest of your code is unchanged) ...
  
