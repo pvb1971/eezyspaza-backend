@@ -32,106 +32,103 @@ app.use((req, res, next) => {
 });
  
 // ========================================================================= //
-// == YOCO CHECKOUT CREATION ROUTE                                        == //
+// == YOCO CHECKOUT CREATION ROUTE                                        == //
 // ========================================================================= //
 app.post('/create-checkout', express.json(), async (req, res) => {
-   console.log("-----> /create-checkout ROUTE HIT! <-----");
-   // console.log("Request Body for /create-checkout:", JSON.stringify(req.body, null, 2));
- 
-   if (!YOCO_API_SECRET_KEY) {
-       console.error("CRITICAL: YOCO_SECRET_KEY (API Secret) environment variable is not set.");
-       return res.status(500).json({ success: false, message: 'Server configuration error: Yoco API secret key missing.' });
-   }
- 
-   const { amount, currency, metadata } = req.body;
-   if (!amount || !currency) {
-       return res.status(400).json({ success: false, message: 'Missing amount or currency.' });
-   }
- 
-   // --- FIREBASE ORDER SAVE CODE ---
-   const orderReference = 'EazySpaza_Order_' + Date.now();
-   const orderData = {
-     order_reference: orderReference,
-     status: 'pending_yoco_payment',
-     items: metadata ? metadata.items : [],
-     customer_name: metadata ? metadata.customer_name : 'Guest Customer',
-     amount: amount,
-     currency: currency,
-     checkoutId: null,
-     yocoPaymentId: null,
-     createdAt: admin.firestore.FieldValue.serverTimestamp()
-   };
- 
-   let newOrderFirebaseId;
-   try {
-       const newOrderRef = await db.collection('orders').add(orderData);
-       newOrderFirebaseId = newOrderRef.id;
-       console.log('Order added to Firebase with ID:', newOrderFirebaseId);
-   } catch (error) {
-       console.error("Error saving order to Firebase:", error);
-       return res.status(500).json({ success: false, message: 'Failed to save order to database.' });
-   }
-   // --- END FIREBASE ORDER SAVE CODE ---
- 
-   const host = req.get('host');
-   const protocol = req.protocol;
-   const baseUrl = `${protocol}://${host}`;
- 
-   const payload = {
-       amount: Math.round(parseFloat(amount) * 100),
-       currency: currency,
-       successUrl: `${baseUrl}/yoco-payment-success`,
-       cancelUrl: `${baseUrl}/yoco-payment-cancel`,
-       failureUrl: `${baseUrl}/yoco-payment-failure`,
-       metadata: {
-           ...metadata,
-           // **CORRECTION:** Adding the Firebase order ID to Yoco's metadata. This is crucial for webhook matching!
-           firebase_order_id: newOrderFirebaseId,
-           order_reference: orderReference
-       },
-   };
- 
-   console.log("Sending to Yoco (/api/checkouts):", JSON.stringify(payload, null, 2));
- 
-   try {
-       const yocoResponse = await axios.post(YOCO_CHECKOUT_API_URL, payload, {
-           headers: {
-              'Authorization': `Bearer ${YOCO_API_SECRET_KEY}`,
-              'Content-Type': 'application/json'
-           }
-       });
- 
-       const checkoutData = yocoResponse.data;
-       const yocoCheckoutId = checkoutData.id;
- 
-       // **CORRECTION:** Update the Firestore document with the Yoco checkoutId
-       await db.collection('orders').doc(newOrderFirebaseId).update({
-         checkoutId: yocoCheckoutId
-       });
-       console.log(`Updated Firebase order with Yoco checkoutId: ${yocoCheckoutId}`);
- 
-       res.json({
-           success: true,
-           redirectUrl: checkoutData.redirectUrl,
-           checkoutId: yocoCheckoutId
-       });
-// ... (code above) ...
-
-   } catch (error) {
-       console.error('Error creating Yoco checkout:');
-       if (error.response) {
-           console.error('Yoco API Error Status:', error.response.status);
-           console.error('Yoco API Error Data:', JSON.stringify(error.response.data, null, 2));
-           res.status(error.response.status || 500).json({
-                success: false,
-                message: 'Failed to create checkout with Yoco.',
-                details: error.response.data
-           });
-       } else {
-           console.error('Network/Request Error:', error.message);
-           res.status(500).json({ success: false, message: 'Internal server error during checkout creation.' });
-       }
-   }
+    console.log("-----> /create-checkout ROUTE HIT! <-----");
+    
+    if (!YOCO_API_SECRET_KEY) {
+        console.error("CRITICAL: YOCO_SECRET_KEY (API Secret) environment variable is not set.");
+        return res.status(500).json({ success: false, message: 'Server configuration error: Yoco API secret key missing.' });
+    }
+    
+    const { amount, currency, metadata } = req.body;
+    if (!amount || !currency) {
+        return res.status(400).json({ success: false, message: 'Missing amount or currency.' });
+    }
+    
+    // --- FIREBASE ORDER SAVE CODE ---
+    const orderReference = 'EazySpaza_Order_' + Date.now();
+    const orderData = {
+        order_reference: orderReference,
+        status: 'pending_yoco_payment',
+        items: metadata ? metadata.items : [],
+        customer_name: metadata ? metadata.customer_name : 'Guest Customer',
+        amount: amount,
+        currency: currency,
+        checkoutId: null,
+        yocoPaymentId: null,
+        createdAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+    
+    let newOrderFirebaseId;
+    try {
+        const newOrderRef = await db.collection('orders').add(orderData);
+        newOrderFirebaseId = newOrderRef.id;
+        console.log('Order added to Firebase with ID:', newOrderFirebaseId);
+    } catch (error) {
+        console.error("Error saving order to Firebase:", error);
+        return res.status(500).json({ success: false, message: 'Failed to save order to database.' });
+    }
+    // --- END FIREBASE ORDER SAVE CODE ---
+    
+    const host = req.get('host');
+    const protocol = req.protocol;
+    const baseUrl = `${protocol}://${host}`;
+    
+    const payload = {
+        amount: Math.round(parseFloat(amount) * 100),
+        currency: currency,
+        successUrl: `${baseUrl}/yoco-payment-success`,
+        cancelUrl: `${baseUrl}/yoco-payment-cancel`,
+        failureUrl: `${baseUrl}/yoco-payment-failure`,
+        metadata: {
+            ...metadata,
+            firebase_order_id: newOrderFirebaseId,
+            order_reference: orderReference
+        },
+    };
+    
+    console.log("Sending to Yoco (/api/checkouts):", JSON.stringify(payload, null, 2));
+    
+    try {
+        const yocoResponse = await axios.post(YOCO_CHECKOUT_API_URL, payload, {
+            headers: {
+                'Authorization': `Bearer ${YOCO_API_SECRET_KEY}`,
+                'Content-Type': 'application/json'
+            }
+        });
+    
+        const checkoutData = yocoResponse.data;
+        const yocoCheckoutId = checkoutData.id;
+    
+        await db.collection('orders').doc(newOrderFirebaseId).update({
+            checkoutId: yocoCheckoutId
+        });
+        console.log(`Updated Firebase order with Yoco checkoutId: ${yocoCheckoutId}`);
+    
+        res.json({
+            success: true,
+            redirectUrl: checkoutData.redirectUrl,
+            checkoutId: yocoCheckoutId
+        });
+    } catch (error) {
+        console.error('Error creating Yoco checkout:', error.response ? error.response.data : error.message);
+        
+        if (newOrderFirebaseId) {
+            await db.collection('orders').doc(newOrderFirebaseId).update({
+                status: 'checkout_failed',
+                errorMessage: error.response ? JSON.stringify(error.response.data) : error.message
+            }).catch(e => console.error("Error updating order status after Yoco failure:", e));
+        }
+        
+        res.status(error.response?.status || 500).json({
+            success: false,
+            message: 'Failed to create checkout with Yoco.',
+            details: error.response?.data || { error: error.message }
+        });
+    }
+});
  
 // ... (code below) ...
  
