@@ -5,6 +5,15 @@ const cors = require('cors');
 const crypto = require('crypto'); // For webhook signature verification
 require('dotenv').config();
 
+const admin = require('firebase-admin');
+const serviceAccount = require('./eezy-spaza-4a8858965d70.json');
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
+const db = admin.firestore();
+
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -37,6 +46,31 @@ app.post('/create-checkout', express.json(), async (req, res) => {
     if (!amount || !currency) {
         return res.status(400).json({ success: false, message: 'Missing amount or currency.' });
     }
+
+/// --- PLACE THE FIREBASE ORDER SAVE CODE HERE ---
+    const orderReference = 'EazySpaza_Order_' + Date.now(); // Generate a unique order reference
+    const orderData = {
+      order_reference: orderReference,
+      status: 'pending_yoco_payment',
+      items: metadata ? metadata.items : [], // Assuming items are in req.body.metadata
+      customer_name: metadata ? metadata.customer_name : 'Guest Customer', // Assuming customer_name is in metadata
+      amount: amount,
+      currency: currency,
+      checkoutId: null, // Will be updated after Yoco response
+      yocoPaymentId: null, // Will be updated by webhook
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+
+    let newOrderFirebaseId;
+    try {
+        const newOrderRef = await db.collection('orders').add(orderData);
+        newOrderFirebaseId = newOrderRef.id; // Store the Firebase document ID
+        console.log('Order added to Firebase with ID:', newOrderFirebaseId);
+    } catch (error) {
+        console.error("Error saving order to Firebase:", error);
+        return res.status(500).json({ success: false, message: 'Failed to save order to database.' });
+    }
+    // --- END FIREBASE ORDER SAVE CODE ---
 
     const host = req.get('host');
     const protocol = req.protocol; // http or https
@@ -309,6 +343,21 @@ app.post('/yoco-webhook-receiver',
 
 
             if (eventType === 'payment.succeeded') {
+// Add this code inside your '/yoco-webhook-receiver' route
+const yocoCheckoutId = req.body.metadata.checkoutId;
+const yocoPaymentId = req.body.id;
+
+const orderQuery = await db.collection('orders').where('checkoutId', '==', yocoCheckoutId).get();
+
+if (!orderQuery.empty) {
+  const orderDoc = orderQuery.docs[0];
+  await orderDoc.ref.update({
+    status: 'paid',
+    yocoPaymentId: yocoPaymentId,
+    paidAt: admin.firestore.FieldValue.serverTimestamp()
+  });
+  console.log('Order', orderDoc.id, 'status updated to paid.');
+}
                 const paymentAmount = eventPayload.amount; // in cents
                 const currency = eventPayload.currency;
                 const yocoPaymentId = eventPayload.id; // Yoco's payment transaction ID (e.g., p_...)
