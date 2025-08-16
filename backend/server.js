@@ -224,11 +224,14 @@ app.post('/yoco-webhook-receiver',
           }
           
           // Webhook Signature is valid - proceed to process the payload
-          const event = req.body;
-          const orderIdFromMetadata = event.metadata ? event.metadata.firebase_order_id : null;
-          const paymentId = event.data ? event.data.id : null;
-          
-          console.log(`(Webhook) Processing event type: ${event.event}. Firebase Order ID: ${orderIdFromMetadata}.`);
+         const event = req.body;
+const eventType = event.type;
+const payload = event.payload;
+
+const orderIdFromMetadata = payload.metadata ? payload.metadata.firebase_order_id : null;
+const paymentId = payload.id;
+
+console.log(`(Webhook) Processing event type: ${eventType}. Firebase Order ID: ${orderIdFromMetadata}.`);
           
           if (orderIdFromMetadata && paymentId) {
              const orderRef = db.collection('orders').doc(orderIdFromMetadata);
