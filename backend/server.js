@@ -247,20 +247,31 @@ app.post('/yoco-webhook-receiver',
                          return;
                      }
                      
-                     for (const item of orderItems) {
-                         const productRef = db.collection('products').doc(item.id);
-                         const productDoc = await transaction.get(productRef);
-                         
-                         const currentStock = productDoc.data().quantity;
-                         const newStock = currentStock - item.quantity;
-                         
-                         if (newStock < 0) {
-                             throw new Error(`Insufficient stock for product ${item.id}.`);
-                         }
-                         
-                         transaction.update(productRef, { quantity: newStock });
-                         console.log(`(Webhook) Updated stock for product ${item.id} from ${currentStock} to ${newStock}.`);
-                     }
+          for (const item of orderItems) {
+   const productRef = db.collection('products').doc(item.id);
+   const productDoc = await transaction.get(productRef);
+   
+   if (!productDoc.exists) {
+      throw new Error(`Product with ID ${item.id} not found in inventory.`);
+   }
+
+   const productData = productDoc.data();
+   // --- NEW CODE ADDED HERE ---
+   if (!productData || typeof productData.quantity === 'undefined') {
+      throw new Error(`Product with ID ${item.id} is missing a 'quantity' field.`);
+   }
+   // --- END NEW CODE ---
+   
+   const currentStock = productData.quantity;
+   const newStock = currentStock - item.quantity;
+   
+   if (newStock < 0) {
+      throw new Error(`Insufficient stock for product ${item.id}.`);
+   }
+   
+   transaction.update(productRef, { quantity: newStock });
+   console.log(`(Webhook) Updated stock for product ${item.id} from ${currentStock} to ${newStock}.`);
+}
                      
                      // Update the order status inside the transaction to ensure atomicity
                      transaction.update(orderRef, {
