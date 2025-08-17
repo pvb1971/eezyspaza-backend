@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Groceries</title>
+  <link rel="stylesheet" href="groceries.css">
+  <script src="groceries.js"></script>
+</head>
+<body>
+<nav class="navbar">
+  <a href="index.html">Home</a>
+  <a href="groceries.html">Groceries</a>
+  <a href="butchery.html">Butchery</a>
+  <a href="bakery.html">Bakery</a>
+  <a href="hardware.html">Hardware</a>
+  <a href="trolley.html" class="view-trolley">🛒 <span id="trolleyCount">0</span></a>
+</nav>
+<div class="product-container">
+  <div class="product-card" data-id="1">
+    <img src="groceries_pics/Five_Roses_Tea_Bags_102.jpg" alt="Five Roses Tea">
+    <h3>Five Roses Tea</h3>
+    <p class="description">Premium black tea (102 bags)</p>
+    <p class="price">R64.99</p>
+    <button class="add-to-trolley" data-id="1" data-name="Five Roses Tea" data-price="64.99" data-image-src="groceries_pics/Five_Roses_Tea_Bags_102.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="2">
+    <img src="groceries_pics/Trinco_Tea_Bags_26.jpg" alt="Trinco Tea 26's">
+    <h3>Trinco Tea 26's</h3>
+    <p class="description">Affordable tea bags</p>
+    <p class="price">R22.99</p>
+    <button class="add-to-trolley" data-id="2" data-name="Trinco Tea 26's" data-price="22.99" data-image-src="groceries_pics/Trinco_Tea_Bags_26.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="3">
+    <img src="groceries_pics/Glen_Tea_100_Bags.jpg" alt="Glen Tea 100s">
+    <h3>Glen Tea 100s</h3>
+    <p class="description">Strong traditional blend</p>
+    <p class="price">R35.99</p>
+    <button class="add-to-trolley" data-id="3" data-name="Glen Tea 100s" data-price="35.99" data-image-src="groceries_pics/Glen_Tea_100_Bags.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="4">
+    <img src="groceries_pics/Joko_Tea_Bags_100.jpg" alt="Joko Tea 100s">
+    <h3>Joko Tea 100s</h3>
+    <p class="description">Rich & full-bodied tea</p>
+    <p class="price">R49.99</p>
+    <button class="add-to-trolley" data-id="4" data-name="Joko Tea 100s" data-price="49.99" data-image-src="groceries_pics/Joko_Tea_Bags_100.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="5">
+    <img src="groceries_pics/Rooibos_Tagless_Tea_Bags_80.jpg" alt="Freshpack Rooibos Tea">
+    <h3>Freshpack Rooibos Tea</h3>
+    <p class="description">Tagless herbal tea bags</p>
+    <p class="price">R53.99</p>
+    <button class="add-to-trolley" data-id="5" data-name="Freshpack Rooibos Tea" data-price="53.99" data-image-src="groceries_pics/Rooibos_Tagless_Tea_Bags_80.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="6">
+    <img src="groceries_pics/Ellis_Brown_Creamer_750g.jpg" alt="Ellis Brown">
+    <h3>Ellis Brown Creamer 750g</h3>
+    <p class="description">Ideal coffee creamer</p>
+    <p class="price">R52.99</p>
+    <button class="add-to-trolley" data-id="6" data-name="Ellis Brown Creamer 750g" data-price="52.99" data-image-src="groceries_pics/Ellis_Brown_Creamer_750g.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="7">
+    <img src="groceries_pics/Frisco_Original_Coffy_250g.jpg" alt="Frisco Original Coffee 250g">
+    <h3>Frisco Original Coffee 250g</h3>
+    <p class="description">Classic instant coffee</p>
+    <p class="price">R64.99</p>
+    <button class="add-to-trolley" data-id="7" data-name="Frisco Original Coffee 250g" data-price="64.99" data-image-src="groceries_pics/Frisco_Original_Coffy_250g.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="8">
+    <img src="groceries_pics/Frisco_Value_Refill_750g.jpg" alt="Frisco Refill Pack">
+    <h3>Frisco Refill Pack 750g</h3>
+    <p class="description">Value-size instant coffee</p>
+    <p class="price">R145.99</p>
+    <button class="add-to-trolley" data-id="8" data-name="Frisco Refill Pack 750g" data-price="145.99" data-image-src="groceries_pics/Frisco_Value_Refill_750g.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="9">
+    <img src="groceries_pics/Milo_Malt_Powder_Drink_500g.jpg" alt="Milo">
+    <h3>Milo 500g</h3>
+    <p class="description">Malted chocolate drink</p>
+    <p class="price">R77.99</p>
+    <button class="add-to-trolley" data-id="9" data-name="Milo 500g" data-price="77.99" data-image-src="groceries_pics/Milo_Malt_Powder_Drink_500g.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="10">
+    <img src="groceries_pics/Nescafe_Classic_200g.jpg" alt="Nescafe Classic">
+    <h3>Nescafe Classic 200g</h3>
+    <p class="description">Premium instant coffee</p>
+    <p class="price">R139.99</p>
+    <button class="add-to-trolley" data-id="10" data-name="Nescafe Classic 200g" data-price="139.99" data-image-src="groceries_pics/Nescafe_Classic_200g.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="11">
+    <img src="groceries_pics/Ricoffy_Tin_400g.jpg" alt="Nescafe Ricoffy Instant Coffee 400g">
+    <h3>Ricoffy Tin 400g</h3>
+    <p class="description">Smooth instant coffee</p>
+    <p class="price">R105.99</p>
+    <button class="add-to-trolley" data-id="11" data-name="Ricoffy Tin 400g" data-price="105.99" data-image-src="groceries_pics/Ricoffy_Tin_400g.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="12">
+    <img src="groceries_pics/Ricoffy_Tin_100g.jpg" alt="Nescafe Ricoffy Instant Coffee 100g">
+    <h3>Ricoffy Tin 100g</h3>
+    <p class="description">Everyday instant coffee</p>
+    <p class="price">R39.99</p>
+    <button class="add-to-trolley" data-id="12" data-name="Ricoffy Tin 100g" data-price="39.99" data-image-src="groceries_pics/Ricoffy_Tin_100g.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="13">
+    <img src="groceries_pics/Ricoffy_Tin_750g.jpg" alt="Nescafe Ricoffy Instant Coffee 750g">
+    <h3>Ricoffy Tin 750g</h3>
+    <p class="description">Large pack for the family</p>
+    <p class="price">R138.99</p>
+    <button class="add-to-trolley" data-id="13" data-name="Ricoffy Tin 750g" data-price="138.99" data-image-src="groceries_pics/Ricoffy_Tin_750g.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="14">
+    <img src="groceries_pics/Ricoffy_Value_Refill_800g.jpg" alt="Nescafe Ricoffy Instant Coffee Refill Pack 800g">
+    <h3>Ricoffy Refill 800g</h3>
+    <p class="description">Great value refill pack</p>
+    <p class="price">R145.99</p>
+    <button class="add-to-trolley" data-id="14" data-name="Ricoffy Refill 800g" data-price="145.99" data-image-src="groceries_pics/Ricoffy_Value_Refill_800g.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="15">
+    <img src="groceries_pics/Selati_Brown_Sugar_500g.jpg" alt="Selati Brown Sugar 500g">
+    <h3>Selati Brown Sugar 500g</h3>
+    <p class="description">Natural brown sugar</p>
+    <p class="price">R14.99</p>
+    <button class="add-to-trolley" data-id="15" data-name="Selati Brown Sugar 500g" data-price="14.99" data-image-src="groceries_pics/Selati_Brown_Sugar_500g.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="16">
+    <img src="groceries_pics/Choc_kits_Classic_Choc.jpg" alt="Choc-kits Classic Choc">
+    <h3>Choc-kits Classic Choc</h3>
+    <p class="description">Alternate pricing</p>
+    <p class="price">R25.99</p>
+    <button class="add-to-trolley" data-id="16" data-name="Choc-kits Classic Choc" data-price="25.99" data-image-src="groceries_pics/Choc_kits_Classic_Choc.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="17">
+    <img src="groceries_pics/Choc_kits_White_Choc.jpg" alt="Choc-kits White Choc">
+    <h3>Choc-kits White Choc</h3>
+    <p class="description">Alternate pricing</p>
+    <p class="price">R25.99</p>
+    <button class="add-to-trolley" data-id="17" data-name="Choc-kits White Choc" data-price="25.99" data-image-src="groceries_pics/Choc_kits_White_Choc.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="18">
+    <img src="groceries_pics/Bakers_Tennis_Biscuits_200g.jpeg" alt="Bakers Tennis Biscuits 200g">
+    <h3>Bakers Tennis Biscuits 200g</h3>
+    <p class="description">Alternate pricing</p>
+    <p class="price">R25.99</p>
+    <button class="add-to-trolley" data-id="18" data-name="Bakers Tennis Biscuits 200g" data-price="25.99" data-image-src="groceries_pics/Bakers_Tennis_Biscuits_200g.jpeg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="19">
+    <img src="groceries_pics/Eet_Sum_Mor_Biscuits.jpg" alt="Eet Sum Mor Biscuits">
+    <h3>Eet Sum Mor Biscuits</h3>
+    <p class="description">Alternate pricing</p>
+    <p class="price">R124.44</p>
+    <button class="add-to-trolley" data-id="19" data-name="Eet Sum Mor Biscuits" data-price="124.44" data-image-src="groceries_pics/Eet_Sum_Mor_Biscuits.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="20">
+    <img src="groceries_pics/Lemon_Cream_Biscuits.jpg" alt="Lemon Cream Biscuits">
+    <h3>Lemon Cream Biscuits</h3>
+    <p class="description">Alternate pricing</p>
+    <p class="price">R128.74</p>
+    <button class="add-to-trolley" data-id="20" data-name="Lemon Cream Biscuits" data-price="128.74" data-image-src="groceries_pics/Lemon_Cream_Biscuits.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="21">
+    <img src="groceries_pics/Diddle_Daddle.jpg" alt="Diddle Daddle">
+    <h3>Diddle Daddle</h3>
+    <p class="description">Alternate pricing</p>
+    <p class="price">R133.05</p>
+    <button class="add-to-trolley" data-id="21" data-name="Diddle Daddle" data-price="133.05" data-image-src="groceries_pics/Diddle_Daddle.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="22">
+    <img src="groceries_pics/Lays_Argentinian_Creamy_Pepper_Steak_125g.jpg" alt="Lay's Argentinian Creamy Pepper Steak 125g">
+    <h3>Lay's Argentinian Creamy Pepper Steak 125g</h3>
+    <p class="description">Alternate pricing</p>
+    <p class="price">R26.99</p>
+    <button class="add-to-trolley" data-id="22" data-name="Lay's Argentinian Creamy Pepper Steak 125g" data-price="26.99" data-image-src="groceries_pics/Lays_Argentinian_Creamy_Pepper_Steak_125g.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="23">
+    <img src="groceries_pics/Lays_Caribean_Onion_&_Balsamic_Vinegar_125g.jpg" alt="Lay's Caribean Onion & Balsamic Vinegar 125g">
+    <h3>Lay's Caribean Onion & Balsamic Vinegar 125g</h3>
+    <p class="description">Alternate pricing</p>
+    <p class="price">R26.99</p>
+    <button class="add-to-trolley" data-id="23" data-name="Lay's Caribean Onion & Balsamic Vinegar 125g" data-price="26.99" data-image-src="groceries_pics/Lays_Caribean_Onion_&_Balsamic_Vinegar_125g.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="24">
+    <img src="groceries_pics/Lays_Salted_Potatoe_Chips_125g.jpg" alt="Lay's Salted Potatoe Chips 125g">
+    <h3>Lay's Salted Potatoe Chips</h3>
+    <p class="description">Alternate pricing</p>
+    <p class="price">R26.99</p>
+    <button class="add-to-trolley" data-id="24" data-name="Lay's Salted Potatoe Chips 125g" data-price="26.99" data-image-src="groceries_pics/Lays_Salted_Potatoe_Chips_125g.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="25">
+    <img src="groceries_pics/Lays_Spring_Onion_&_Cheese_125g.jpg" alt="Lay's Spring Onion & Cheese 125g">
+    <h3>Lay's Spring Onion & Cheese 125g</h3>
+    <p class="description">Alternate pricing</p>
+    <p class="price">R26.99</p>
+    <button class="add-to-trolley" data-id="25" data-name="Lay's Spring Onion & Cheese 125g" data-price="26.99" data-image-src="groceries_pics/Lays_Spring_Onion_&_Cheese_125g.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="26">
+    <img src="groceries_pics/Lays_Sweet_&_Smokey_American_BBQ_125g.jpg" alt="Lay's Sweet & Smokey American BBQ 125g">
+    <h3>Lay's Sweet & Smokey American BBQ 125g</h3>
+    <p class="description">Alternate pricing</p>
+    <p class="price">R26.99</p>
+    <button class="add-to-trolley" data-id="26" data-name="Lay's Sweet & Smokey American BBQ 125g" data-price="26.99" data-image-src="groceries_pics/Lays_Sweet_&_Smokey_American_BBQ_125g.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="27">
+    <img src="groceries_pics/Lays_Thai_Sweet_Chilli_Flavour_125g.jpg" alt="Lays Thai Sweet Chilli Flavour 125g">
+    <h3>Lays Thai Sweet Chilli Flavour 125g</h3>
+    <p class="description">Alternate pricing</p>
+    <p class="price">R26.99</p>
+    <button class="add-to-trolley" data-id="27" data-name="Lays Thai Sweet Chilli Flavour 125g" data-price="26.99" data-image-src="groceries_pics/Lays_Thai_Sweet_Chilli_Flavour_125g.jpg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="28">
+    <img src="groceries_pics/Simba_Cheese_&_Onion_Flavour_120g.jpeg" alt="Simba Cheese & Onion Flavour 120g">
+    <h3>Simba Cheese & Onion 120g</h3>
+    <p class="description">Alternate pricing</p>
+    <p class="price">R22.99</p>
+    <button class="add-to-trolley" data-id="28" data-name="Simba Cheese & Onion 120g" data-price="22.99" data-image-src="groceries_pics/Simba_Cheese_&_Onion_Flavour_120g.jpeg">Add to Trolley</button>
+  </div>
+  <div class="product-card" data-id="29">
+    <img src="groceries_pics/Simba_KFC_Original_Flavour_120g.jpg" alt="Simba KFC Original Flavour 120g">
+    <h3>Simba KFC Original Flavour 120g</h3>
+    <p class="description">Alternate pricing</p>
+    <p class="price">R22.99</p>
+    <button class="add-to-trolley" data-id="29" data-name="Simba KFC Original Flavour
