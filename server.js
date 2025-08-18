@@ -72,7 +72,7 @@ app.post('/create-checkout', express.json(), async (req, res) => {
    // --- END FIREBASE ORDER SAVE CODE ---
    
    const host = req.get('host');
-   const protocol = req.protocol;
+   const protocol = 'https';
    const baseUrl = `${protocol}://${host}`;
    
    const payload = {
@@ -349,3 +349,4 @@ app.listen(port, () => {
        console.warn("WARNING: YOCO_WEBHOOK_SECRET is not configured.");
    }
 });
+
