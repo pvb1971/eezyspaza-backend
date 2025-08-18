@@ -238,7 +238,7 @@ app.post('/yoco-webhook-receiver',
              if (eventType === 'payment.succeeded') {
                  
                  // --- NEW INVENTORY LOGIC START ---
-                 const items = JSON.parse(webhookData.payload.metadata.items);
+                 const items = JSON.parse(payload.metadata.items);
                  
                  await db.runTransaction(async (transaction) => {
                      const orderDoc = await transaction.get(orderRef);
@@ -327,3 +327,4 @@ app.listen(port, () => {
        console.warn("WARNING: YOCO_WEBHOOK_SECRET is not configured.");
    }
 });
+
