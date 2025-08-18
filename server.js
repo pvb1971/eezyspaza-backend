@@ -238,7 +238,7 @@ app.post('/yoco-webhook-receiver',
              if (eventType === 'payment.succeeded') {
                  
                  // --- NEW INVENTORY LOGIC START ---
-                 const orderItems = JSON.parse(payload.metadata.items);
+                const orderItems = JSON.parse(payload.metadata.items);
                  
                  await db.runTransaction(async (transaction) => {
                      const orderDoc = await transaction.get(orderRef);
@@ -308,6 +308,28 @@ app.get('/health', (req, res) => {
    res.status(200).send('OK');
 });
 
+// ========================================================================= //
+// == YOCO PAYMENT SUCCESS PAGE                                          == //
+// ========================================================================= //
+app.get('/yoco-payment-success', (req, res) => {
+    // You could render a success page here, e.g., res.sendFile(__dirname + '/success.html');
+    res.send('Payment successful! Your order has been placed.');
+});
+
+// ========================================================================= //
+// == YOCO PAYMENT CANCELED PAGE                                          == //
+// ========================================================================= //
+app.get('/yoco-payment-cancel', (req, res) => {
+    res.send('Payment was cancelled. Your order has not been placed.');
+});
+
+// ========================================================================= //
+// == YOCO PAYMENT FAILURE PAGE                                           == //
+// ========================================================================= //
+app.get('/yoco-payment-failure', (req, res) => {
+    res.send('Payment failed. Please try again.');
+});
+
 // Start the server
 app.listen(port, () => {
    console.log(`EazySpaza Backend Server running on port ${port}. Waiting for requests...`);
@@ -327,6 +349,3 @@ app.listen(port, () => {
        console.warn("WARNING: YOCO_WEBHOOK_SECRET is not configured.");
    }
 });
-
-
-
