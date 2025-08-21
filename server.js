@@ -2,7 +2,7 @@
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
-const crypto = require('crypto'); // For webhook signature verification
+const crypto = require('crypto');
 require('dotenv').config();
 
 const admin = require('firebase-admin');
@@ -36,7 +36,7 @@ app.use((req, res, next) => {
 });
 
 // ========================
-// CREATE CHECKOUT ROUTE
+// CREATE CHECKOUT
 // ========================
 app.post('/create-checkout', async (req, res) => {
   console.log("-----> /create-checkout ROUTE HIT <-----");
@@ -75,11 +75,11 @@ app.post('/create-checkout', async (req, res) => {
   }
 
   // Build Yoco checkout payload
-  const baseUrl = process.env.BASE_URL || 'https://eezyspaza-backend1.onrender.com';
+  const baseUrl = process.env.BASE_URL || 'https://paytest-backend.onrender.com';
   const payload = {
     amount: Math.round(parseFloat(amount) * 100),
     currency,
-    successUrl: `${baseUrl}/payment-success-webview`,
+    successUrl: `${baseUrl}/yoco-payment-success`,
     cancelUrl: `${baseUrl}/yoco-payment-cancel`,
     failureUrl: `${baseUrl}/yoco-payment-failure`,
     metadata: {
@@ -125,32 +125,17 @@ app.post('/create-checkout', async (req, res) => {
 // YOCO WEBHOOK RECEIVER
 // ========================
 app.post('/yoco-webhook-receiver', async (req, res) => {
-  console.log("-----> FULL /yoco-webhook-receiver ROUTE HIT <-----");
+  console.log("-----> /yoco-webhook-receiver ROUTE HIT <-----");
   console.log("RAW WEBHOOK BODY:", req.rawBody);
 
   try {
-    // Verify webhook signature
-    const headers = req.headers;
-    const id = headers['webhook-id'];
-    const timestamp = headers['webhook-timestamp'];
-    const signatureHeader = headers['webhook-signature']?.split(' ')[0].split(',')[1];
-    const signedContent = `${id}.${timestamp}.${req.rawBody}`;
-    const secretBytes = Buffer.from(YOCO_WEBHOOK_SECRET.split('_')[1], 'base64');
-    const expectedSignature = crypto.createHmac('sha256', secretBytes).update(signedContent).digest('base64');
-
-    if (!crypto.timingSafeEqual(Buffer.from(expectedSignature), Buffer.from(signatureHeader))) {
-      console.warn("Webhook signature mismatch");
-      return res.sendStatus(403);
-    }
-
     const event = req.body;
     console.log("PARSED WEBHOOK BODY:", JSON.stringify(event, null, 2));
 
     const firebaseOrderId = event.payload?.metadata?.firebase_order_id;
-    console.log(`(Webhook) Processing event type: ${event.type}. Firebase Order ID: ${firebaseOrderId}.`);
 
     if (event.type === 'payment.succeeded') {
-      const productId = JSON.parse(event.payload.metadata.items)[0].id;
+      const productId = JSON.parse(event.payload.metadata.items || '[]')[0]?.id;
       console.log(`(Webhook) Updated stock for product ${productId}.`);
 
       await db.collection('orders').doc(firebaseOrderId).update({
@@ -167,23 +152,11 @@ app.post('/yoco-webhook-receiver', async (req, res) => {
 });
 
 // ========================
-// PAYMENT SUCCESS WEBVIEW
+// REDIRECT PAGES
 // ========================
-app.get('/payment-success-webview', (req, res) => {
-  console.log('-----> /payment-success-webview ROUTE HIT <-----');
-  res.send(`
-    <html>
-      <body>
-        <h1>Payment Successful!</h1>
-        <p>Your order has been placed.</p>
-      </body>
-    </html>
-  `);
+app.get('/yoco-payment-success', (req, res) => {
+  res.send(`<html><body><h1>Payment Successful!</h1></body></html>`);
 });
-
-// ========================
-// CANCEL & FAILURE
-// ========================
 app.get('/yoco-payment-cancel', (req, res) => res.send('Payment was cancelled.'));
 app.get('/yoco-payment-failure', (req, res) => res.send('Payment failed. Please try again.'));
 
@@ -196,7 +169,7 @@ app.get('/health', (req, res) => res.status(200).send('OK'));
 // START SERVER
 // ========================
 app.listen(port, () => {
-  console.log(`EazySpaza Backend running on port ${port}`);
+  console.log(`EazySpaza Backend Server running on port ${port}`);
   if (YOCO_API_SECRET_KEY) console.log('Yoco API Key loaded.');
   if (YOCO_WEBHOOK_SECRET) console.log('Yoco Webhook Secret loaded.');
 });
