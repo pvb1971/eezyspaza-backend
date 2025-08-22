@@ -82,15 +82,22 @@ app.post("/yoco-webhook-receiver", async (req, res) => {
     console.log("PARSED WEBHOOK BODY:", JSON.stringify(event, null, 2));
 
     if (event.type === "payment.succeeded") {
-      const orderId = event.payload.metadata.firebase_order_id;
+      const payload = event.payload;
+      const orderId = payload.metadata.firebase_order_id;
+
       console.log(
         `(Webhook) Processing event type: ${event.type}. Firebase Order ID: ${orderId}.`
       );
 
+      // ✅ Store only safe fields
       await db.collection("orders").doc(orderId).update({
         status: "paid",
-        paymentId: event.payload.id,
-        paymentDetails: event.payload,
+        paymentId: payload.id,
+        amount: payload.amount,
+        currency: payload.currency,
+        card: payload.paymentMethodDetails?.card?.maskedCard || "N/A",
+        scheme: payload.paymentMethodDetails?.card?.scheme || "N/A",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     }
 
