@@ -81,33 +81,25 @@ app.post("/create-checkout", async (req, res) => {
 // Webhook: Yoco payment notifications
 app.post(
   "/yoco-webhook-receiver",
-  express.raw({ type: "application/json" }), // IMPORTANT: raw body for signature validation
+  express.raw({ type: "application/json" }),
   async (req, res) => {
     try {
-      console.log("-----> FULL /yoco-webhook-receiver ROUTE HIT <-----");
       const rawBody = req.body.toString();
       console.log("RAW WEBHOOK BODY:", rawBody);
 
-      const event = JSON.parse(rawBody);
+      const event = JSON.parse(rawBody); // safely parse now
 
       if (event.type === "payment.succeeded") {
-        const payload = event.payload;
-        const orderId = payload.metadata.firebase_order_id;
-
-        console.log(`(Webhook) Processing payment.succeeded. Firebase Order ID: ${orderId}`);
+        const orderId = event.payload.metadata.firebase_order_id;
+        console.log(`Processing payment.succeeded. Firebase Order ID: ${orderId}`);
 
         // Update Firebase order
         await db.collection("orders").doc(orderId).update({
           status: "paid",
-          amount: payload.amount,
-          currency: payload.currency,
-          paymentId: payload.id,
-          card: payload.paymentMethodDetails?.card?.maskedCard || "N/A",
-          scheme: payload.paymentMethodDetails?.card?.scheme || "N/A",
+          amount: event.payload.amount,
+          currency: event.payload.currency,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-
-        console.log(`(Webhook) Order ${orderId} updated to PAID`);
       }
 
       res.status(200).send("Webhook processed");
@@ -138,3 +130,4 @@ app.listen(PORT, () => {
   console.log("YOCO_SECRET_KEY configured:", YOCO_SECRET_KEY?.slice(0, 10) + "..."); // hide key
   console.log("YOCO_WEBHOOK_SECRET configured:", YOCO_WEBHOOK_SECRET?.slice(0, 10) + "...");
 });
+
