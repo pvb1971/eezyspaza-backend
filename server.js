@@ -99,20 +99,20 @@ app.post("/yoco-webhook-receiver", (req, res) => {
 // Success / Cancel / Failure pages
 app.get("/yoco-payment-success", (req, res) => {
   console.log("INCOMING REQUEST: GET /yoco-payment-success");
-  res.send("<h1>✅ Payment Successful!</h1><p>Thank you for your purchase.</p>");
-});
 
-app.get("/yoco-payment-cancel", (req, res) => {
-  console.log("INCOMING REQUEST: GET /yoco-payment-cancel");
-  res.send("<h1>⚠️ Payment Cancelled</h1><p>You cancelled the payment.</p>");
-});
+  const orderId = req.query.orderId || "unknown";
 
-app.get("/yoco-payment-failure", (req, res) => {
-  console.log("INCOMING REQUEST: GET /yoco-payment-failure");
-  res.send("<h1>❌ Payment Failed</h1><p>Something went wrong with your payment.</p>");
-});
-
-app.listen(PORT, () => {
-  console.log(`🚀 EazySpaza Backend running on port ${PORT}`);
-  console.log(`🌍 Base URL: ${process.env.BASE_URL}`);
+  res.send(`
+    <h1>✅ Payment Successful!</h1>
+    <p>Thank you for your purchase.</p>
+    <script>
+      // Send message to WebView
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: "paymentSuccess",
+          orderId: "${orderId}"
+        }));
+      }
+    </script>
+  `);
 });
