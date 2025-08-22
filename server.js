@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(bodyParser.json());
 
-// ✅ Firebase init (only if not already initialized)
+// ✅ Firebase init
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.applicationDefault(),
@@ -25,14 +25,13 @@ app.get("/", (req, res) => {
   res.send("✅ EezySpaza Backend is running!");
 });
 
-// ✅ Create Checkout Route
+// ✅ Create Checkout
 app.post("/create-checkout", async (req, res) => {
   try {
     console.log("INCOMING REQUEST: POST /create-checkout");
 
     const { amount } = req.body;
 
-    // Add order to Firebase first
     const orderRef = await db.collection("orders").add({
       amount,
       status: "pending",
@@ -40,7 +39,6 @@ app.post("/create-checkout", async (req, res) => {
     });
     console.log("Order added to Firebase with ID:", orderRef.id);
 
-    // Call Yoco API
     const response = await fetch("https://payments.yoco.com/api/checkouts", {
       method: "POST",
       headers: {
@@ -50,9 +48,9 @@ app.post("/create-checkout", async (req, res) => {
       body: JSON.stringify({
         amount,
         currency: "ZAR",
-        successUrl: "http://eezyspaza-backend1.onrender.com/yoco-payment-success",
-        cancelUrl: "http://eezyspaza-backend1.onrender.com/yoco-payment-cancel",
-        failureUrl: "http://eezyspaza-backend1.onrender.com/yoco-payment-failure",
+        successUrl: `http://eezyspaza-backend1.onrender.com/yoco-payment-success?orderId=${orderRef.id}`,
+        cancelUrl: `http://eezyspaza-backend1.onrender.com/yoco-payment-cancel?orderId=${orderRef.id}`,
+        failureUrl: `http://eezyspaza-backend1.onrender.com/yoco-payment-failure?orderId=${orderRef.id}`,
         metadata: {
           firebase_order_id: orderRef.id,
           order_reference: `EazySpaza_Order_${Date.now()}`,
@@ -61,9 +59,8 @@ app.post("/create-checkout", async (req, res) => {
     });
 
     const data = await response.json();
-    console.log("Sending to Yoco (/api/checkouts):", JSON.stringify(data, null, 2));
+    console.log("Yoco Response (/api/checkouts):", JSON.stringify(data, null, 2));
 
-    // Update Firebase with checkout ID
     await orderRef.update({ checkoutId: data.id });
     console.log("Updated Firebase order with Yoco checkoutId:", data.id);
 
@@ -78,16 +75,13 @@ app.post("/create-checkout", async (req, res) => {
 app.post("/yoco-webhook-receiver", async (req, res) => {
   try {
     console.log("INCOMING REQUEST: POST /yoco-webhook-receiver");
-    console.log("-----> FULL /yoco-webhook-receiver ROUTE HIT <-----");
     console.log("RAW WEBHOOK BODY:", JSON.stringify(req.body));
 
-    const event = req.body; // already parsed by bodyParser.json()
-    console.log("PARSED WEBHOOK BODY:", JSON.stringify(event, null, 2));
-
+    const event = req.body;
     const eventType = event.type;
     const orderId = event?.payload?.metadata?.firebase_order_id;
 
-    console.log(`(Webhook) Processing event type: ${eventType}. Firebase Order ID: ${orderId}.`);
+    console.log(`(Webhook) Event type: ${eventType}, Order ID: ${orderId}`);
 
     if (eventType === "payment.succeeded" && orderId) {
       await db.collection("orders").doc(orderId).update({
@@ -95,24 +89,47 @@ app.post("/yoco-webhook-receiver", async (req, res) => {
         paymentId: event.payload.id,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
-      console.log("✅ Order updated in Firebase:", orderId);
+      console.log("✅ Order updated to PAID:", orderId);
     }
 
     res.sendStatus(200);
   } catch (error) {
-    console.error("Webhook processing error:", error.message);
+    console.error("Webhook error:", error.message);
     res.sendStatus(400);
   }
 });
 
-// ✅ Payment Result Pages
-app.get("/yoco-payment-success", (req, res) => {
-  res.send(`
-    <h1>✅ Payment Successful</h1>
-    <p>Thank you! Your payment has been processed.</p>
-  `);
+// ✅ Success Page with Order Details
+app.get("/yoco-payment-success", async (req, res) => {
+  try {
+    const { orderId } = req.query;
+
+    if (!orderId) {
+      return res.send("<h1>✅ Payment Successful</h1><p>Order ID missing.</p>");
+    }
+
+    const orderDoc = await db.collection("orders").doc(orderId).get();
+
+    if (!orderDoc.exists) {
+      return res.send(`<h1>✅ Payment Successful</h1><p>Order not found in Firebase.</p>`);
+    }
+
+    const order = orderDoc.data();
+
+    res.send(`
+      <h1>✅ Payment Successful</h1>
+      <p><b>Order Reference:</b> ${order.order_reference || "N/A"}</p>
+      <p><b>Firebase Order ID:</b> ${orderId}</p>
+      <p><b>Payment ID:</b> ${order.paymentId || "Pending webhook"}</p>
+      <p><b>Amount Paid:</b> R ${(order.amount / 100).toFixed(2)}</p>
+    `);
+  } catch (error) {
+    console.error("Error loading success page:", error.message);
+    res.send("<h1>✅ Payment Successful</h1><p>Error loading order details.</p>");
+  }
 });
 
+// ✅ Cancel Page
 app.get("/yoco-payment-cancel", (req, res) => {
   res.send(`
     <h1>❌ Payment Cancelled</h1>
@@ -120,6 +137,7 @@ app.get("/yoco-payment-cancel", (req, res) => {
   `);
 });
 
+// ✅ Failure Page
 app.get("/yoco-payment-failure", (req, res) => {
   res.send(`
     <h1>⚠️ Payment Failed</h1>
