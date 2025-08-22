@@ -306,23 +306,29 @@ app.post('/yoco-webhook-receiver', async (req, res) => {
 // ------------------------
 // Simple success page for WebView
 // ------------------------
-app.get('/payment-success-webview', (req, res) => {
+// Success URL
+app.get("/yoco-payment-success", (req, res) => {
   res.send(`
-    <html><body>
-      <h1>Payment Successful!</h1>
-      <p>Your order has been placed.</p>
-      <script>setTimeout(function(){ window.location.href = "app://close"; }, 1000);</script>
-    </body></html>
+    <h1>✅ Payment Successful</h1>
+    <p>Thank you! Your payment has been processed.</p>
   `);
 });
 
-// Cancel & Failure
-app.get('/yoco-payment-cancel', (req, res) =>
-  res.send('Payment was cancelled.')
-);
-app.get('/yoco-payment-failure', (req, res) =>
-  res.send('Payment failed. Please try again.')
-);
+// Cancel URL
+app.get("/yoco-payment-cancel", (req, res) => {
+  res.send(`
+    <h1>❌ Payment Cancelled</h1>
+    <p>Your payment was cancelled. Please try again.</p>
+  `);
+});
+
+// Failure URL
+app.get("/yoco-payment-failure", (req, res) => {
+  res.send(`
+    <h1>⚠️ Payment Failed</h1>
+    <p>There was a problem processing your payment.</p>
+  `);
+});
 
 // Health
 app.get('/health', (req, res) => res.status(200).send('OK'));
@@ -359,3 +365,4 @@ function YOCO_SECRET_KEY_MASK(key) {
   if (!key) return null;
   return key.slice(0, 12) + '...';
 }
+
