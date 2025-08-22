@@ -1,99 +1,83 @@
 // server.js
-require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const admin = require("firebase-admin");
 const axios = require("axios");
 
-const app = express();
-const PORT = process.env.PORT || 3000;
+// Load your Firebase service account
+const serviceAccount = require("./serviceAccountKey.json");
 
-// Initialize Firebase Admin SDK
-const serviceAccount = require("./serviceAccountKey.json"); // <-- Your Firebase service account JSON
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
 const db = admin.firestore();
 
-// Middleware
+const app = express();
 app.use(cors());
-app.use(express.json()); // Only for normal routes, NOT webhook
+app.use(express.json()); // default JSON parser for non-webhook routes
 
-const YOCO_SECRET_KEY = process.env.YOCO_SECRET_KEY;
-const YOCO_WEBHOOK_SECRET = process.env.YOCO_WEBHOOK_SECRET;
-
-// Helper: create Yoco checkout
-async function createYocoCheckout(orderId, amount) {
-  const url = "https://online.yoco.com/v1/online-checkouts";
-  const body = {
-    amount: amount,
-    currency: "ZAR",
-    successUrl: "https://eezyspaza-backend1.onrender.com/yoco-payment-success",
-    cancelUrl: "https://eezyspaza-backend1.onrender.com/yoco-payment-cancel",
-    failureUrl: "https://eezyspaza-backend1.onrender.com/yoco-payment-failure",
-    metadata: {
-      firebase_order_id: orderId,
-      order_reference: `EazySpaza_Order_${Date.now()}`,
-    },
-  };
-
-  const resp = await axios.post(url, body, {
-    headers: {
-      Authorization: `Bearer ${YOCO_SECRET_KEY}`,
-      "Content-Type": "application/json",
-    },
-  });
-
-  return resp.data;
-}
-
-// Route: create checkout
+//----------------------------------------------------
+// 1. Create Yoco Checkout Session
+//----------------------------------------------------
 app.post("/create-checkout", async (req, res) => {
   try {
-    console.log("-----> /create-checkout ROUTE HIT! <-----");
+    const { orderId, items } = req.body; // items from Firebase cart
+    if (!orderId || !items) {
+      return res.status(400).json({ error: "orderId and items required" });
+    }
 
-    const { amount } = req.body;
-    if (!amount) return res.status(400).json({ error: "Amount required" });
+    // Calculate total from items
+    const total = items.reduce((sum, item) => sum + parseFloat(item.price), 0);
 
-    // Add order to Firebase
-    const orderRef = await db.collection("orders").add({
-      amount,
-      status: "pending",
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    // Convert to cents for Yoco (R64.99 -> 6499)
+    const amountInCents = Math.round(total * 100);
 
-    console.log("Order added to Firebase with ID:", orderRef.id);
+    // Call Yoco API to create checkout
+    const response = await axios.post(
+      "https://online.yoco.com/v1/checkout",
+      {
+        amount: amountInCents,
+        currency: "ZAR",
+        successUrl: "https://eezyspaza-backend1.onrender.com/yoco-payment-success",
+        cancelUrl: "https://eezyspaza-backend1.onrender.com/yoco-payment-cancel",
+        failureUrl: "https://eezyspaza-backend1.onrender.com/yoco-payment-failure",
+        metadata: {
+          firebase_order_id: orderId,
+        },
+      },
+      {
+        headers: {
+          "X-Auth-Secret-Key": process.env.YOCO_SECRET_KEY, // set in Render Dashboard
+        },
+      }
+    );
 
-    // Create Yoco checkout
-    const checkoutData = await createYocoCheckout(orderRef.id, amount);
-
-    // Update Firebase with checkout ID
-    await orderRef.update({ checkoutId: checkoutData.id });
-    console.log("Updated Firebase order with Yoco checkoutId:", checkoutData.id);
-
-    res.json({ checkout: checkoutData });
+    return res.json(response.data);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Server error" });
+    console.error("Error creating checkout:", err.message);
+    return res.status(500).json({ error: "Checkout creation failed" });
   }
 });
 
-// Webhook: Yoco payment notifications
+//----------------------------------------------------
+// 2. Webhook: payment.succeeded
+//----------------------------------------------------
 app.post(
   "/yoco-webhook-receiver",
-  express.raw({ type: "application/json" }),
+  express.raw({ type: "application/json" }), // raw parser only for webhook
   async (req, res) => {
     try {
       const rawBody = req.body.toString();
       console.log("RAW WEBHOOK BODY:", rawBody);
 
-      const event = JSON.parse(rawBody); // safely parse now
+      const event = JSON.parse(rawBody);
+
+      console.log("PARSED WEBHOOK BODY:", event);
 
       if (event.type === "payment.succeeded") {
         const orderId = event.payload.metadata.firebase_order_id;
-        console.log(`Processing payment.succeeded. Firebase Order ID: ${orderId}`);
+        console.log(`(Webhook) Processing payment.succeeded for order: ${orderId}`);
 
-        // Update Firebase order
         await db.collection("orders").doc(orderId).update({
           status: "paid",
           amount: event.payload.amount,
@@ -110,24 +94,21 @@ app.post(
   }
 );
 
-// Simple GET routes for redirect URLs
+//----------------------------------------------------
+// 3. Success / Cancel / Failure Routes
+//----------------------------------------------------
 app.get("/yoco-payment-success", (req, res) => {
-  res.send("Payment Successful! ✅");
+  res.send("<h1>✅ Payment Successful!</h1><p>Thank you for shopping at EezySpaza.</p>");
 });
+
 app.get("/yoco-payment-cancel", (req, res) => {
-  res.send("Payment Cancelled ❌");
+  res.send("<h1>❌ Payment Cancelled</h1><p>You cancelled your payment.</p>");
 });
+
 app.get("/yoco-payment-failure", (req, res) => {
-  res.send("Payment Failed ❌");
+  res.send("<h1>⚠️ Payment Failed</h1><p>Something went wrong, please try again.</p>");
 });
 
-// Health check
-app.get("/health", (req, res) => res.send("OK"));
-
-app.listen(PORT, () => {
-  console.log(`EazySpaza Backend Server running on port ${PORT}. Waiting for requests...`);
-  console.log("Node Environment:", process.env.NODE_ENV || "development");
-  console.log("YOCO_SECRET_KEY configured:", YOCO_SECRET_KEY?.slice(0, 10) + "..."); // hide key
-  console.log("YOCO_WEBHOOK_SECRET configured:", YOCO_WEBHOOK_SECRET?.slice(0, 10) + "...");
-});
-
+//----------------------------------------------------
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
