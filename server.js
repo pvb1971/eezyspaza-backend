@@ -158,141 +158,139 @@ app.post("/webhook", bodyParser.raw({ type: "application/json" }), async (req, r
   // console.log("(Webhook) Full event payload:", JSON.stringify(event, null, 2));
 
 
-  if (event.type === "payment.succeeded") {
-    const paymentPayload = event.payload; // In your logs, the actual data is in event.payload
+  // In your server.js - within the app.post("/webhook", ...) route
+
+// ... (after signature verification and event parsing) ...
+
+if (event.type === "payment.succeeded") {
+    const paymentPayload = event.payload;
     const firebaseOrderId = paymentPayload.metadata?.firebase_order_id;
     const itemsString = paymentPayload.metadata?.items;
 
-    if (!firebaseOrderId) {
-      console.error("(Webhook) Missing firebase_order_id in payment metadata.");
-      return res.status(400).send("Missing firebase_order_id in metadata");
-    }
-    if (!itemsString) {
-      console.error(`(Webhook) Missing items string in payment metadata for order ${firebaseOrderId}.`);
-      return res.status(400).send("Missing items in metadata");
-    }
-
-    console.log(`(Webhook) Payment succeeded for Firebase Order ID: ${firebaseOrderId}.`);
+    // ... (your existing checks for firebaseOrderId and itemsString) ...
 
     let items;
     try {
-      items = JSON.parse(itemsString);
-      if (!Array.isArray(items)) throw new Error("Items metadata is not an array.");
+        items = JSON.parse(itemsString);
+        if (!Array.isArray(items)) throw new Error("Items metadata is not an array.");
     } catch (e) {
-      console.error(`(Webhook) Error parsing items metadata for order ${firebaseOrderId}: ${e.message}. Items string: ${itemsString}`);
-      return res.status(400).send("Invalid items format in metadata");
+        console.error(`(Webhook) Error parsing items metadata for order ${firebaseOrderId}: ${e.message}. Items string: ${itemsString}`);
+        return res.status(400).send("Invalid items format in metadata");
     }
 
+    console.log(`(Webhook) Attempting Firestore transaction for order: ${firebaseOrderId}`);
     try {
-      await db.runTransaction(async (transaction) => {
-        // --- ALL READS FIRST ---
-        const orderRef = db.collection("orders").doc(firebaseOrderId);
-        const orderDoc = await transaction.get(orderRef);
+        await db.runTransaction(async (transaction) => {
+            console.log(`(Webhook) [TXN_START] Order: ${firebaseOrderId}`);
 
-        // It's possible the order document isn't created yet if /create-checkout
-        // doesn't create it. The webhook might need to create it.
-        // For this example, let's assume it should exist or we create/set it.
-        if (!orderDoc.exists) {
-          console.log(`(Webhook) Order ${firebaseOrderId} not found, creating new order document.`);
-          // If creating here, ensure you have all necessary info from metadata
-          transaction.set(orderRef, {
-            yocoPaymentId: paymentPayload.id,
-            yocoCheckoutId: paymentPayload.metadata?.checkoutId,
-            amount: paymentPayload.amount / 100, // Store in ZAR
-            currency: paymentPayload.currency,
-            status: "paid", // Set directly to paid
-            items: items, // Store parsed items
-            customerName: paymentPayload.metadata?.customer_name,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            webhookEventId: event.id
-          });
-        } else {
-            // If it exists, update it
-            console.log(`(Webhook) Order ${firebaseOrderId} found. Current status: ${orderDoc.data().status}`);
-             transaction.update(orderRef, {
-                status: "paid",
-                yocoPaymentId: paymentPayload.id,
-                paymentStatusYoco: paymentPayload.status, // e.g., 'succeeded'
-                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-                webhookEventId: event.id
-            });
-        }
-        console.log(`(Webhook) Order ${firebaseOrderId} marked as paid.`);
+            // --- PHASE 1: ALL READS ---
+            console.log(`(Webhook) [TXN_READ] Getting order document: ${firebaseOrderId}`);
+            const orderRef = db.collection("orders").doc(firebaseOrderId);
+            const orderDoc = await transaction.get(orderRef);
 
+            // Prepare product reads
+            const productReadOperations = [];
+            for (const item of items) {
+                if (!item.id || typeof item.quantity === 'undefined') {
+                    console.warn(`(Webhook) [TXN_INFO] Order ${firebaseOrderId}: Item missing id or quantity, skipping stock update for:`, item);
+                    continue;
+                }
+                const productRef = db.collection("products").doc(String(item.id));
+                productReadOperations.push({
+                    ref: productRef,
+                    id: String(item.id),
+                    quantitySold: parseInt(item.quantity, 10)
+                });
+            }
+            
+            let productDocsSnapshots = [];
+            if (productReadOperations.length > 0) {
+                console.log(`(Webhook) [TXN_READ] Getting ${productReadOperations.length} product documents for order ${firebaseOrderId}.`);
+                const refsToGetAll = productReadOperations.map(op => op.ref);
+                productDocsSnapshots = await transaction.getAll(...refsToGetAll);
+            } else {
+                console.log(`(Webhook) [TXN_INFO] Order ${firebaseOrderId}: No valid items with ID and quantity for stock update.`);
+            }
 
-        // Prepare to read all product stocks
-        const productUpdates = [];
-        for (const item of items) {
-          if (!item.id || !item.quantity) {
-            console.warn("(Webhook) Item in order is missing id or quantity:", item);
-            continue;
-          }
-          const productRef = db.collection("products").doc(String(item.id)); // Ensure item.id is a string
-          productUpdates.push({ ref: productRef, quantitySold: parseInt(item.quantity, 10), id: item.id });
-        }
+            console.log(`(Webhook) [TXN_READ_COMPLETE] All reads finished for order ${firebaseOrderId}.`);
 
-        if (productUpdates.length > 0) {
-            const productDocsSnapshots = await transaction.getAll(...productUpdates.map(pu => pu.ref));
+            // --- PHASE 2: ALL WRITES ---
+            console.log(`(Webhook) [TXN_WRITE_START] Starting writes for order ${firebaseOrderId}.`);
 
-            // --- NOW ALL WRITES (for products) ---
+            // 1. Update/Set Order Document
+            if (!orderDoc.exists) {
+                console.log(`(Webhook) [TXN_WRITE] Order ${firebaseOrderId} not found, creating new document.`);
+                transaction.set(orderRef, {
+                    yocoPaymentId: paymentPayload.id,
+                    yocoCheckoutId: paymentPayload.metadata?.checkoutId,
+                    amount: paymentPayload.amount / 100,
+                    currency: paymentPayload.currency,
+                    status: "paid",
+                    items: items, // Store parsed items from metadata
+                    customerName: paymentPayload.metadata?.customer_name,
+                    createdAt: admin.firestore.FieldValue.serverTimestamp(), // Set only on creation
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                    webhookEventId: event.id
+                });
+            } else {
+                console.log(`(Webhook) [TXN_WRITE] Updating existing order ${firebaseOrderId}. Current status: ${orderDoc.data().status}`);
+                transaction.update(orderRef, {
+                    status: "paid",
+                    yocoPaymentId: paymentPayload.id,
+                    paymentStatusYoco: paymentPayload.status,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                    webhookEventId: event.id
+                });
+            }
+            console.log(`(Webhook) [TXN_WRITE] Order ${firebaseOrderId} status processed.`);
+
+            // 2. Update Product Stocks
             for (let i = 0; i < productDocsSnapshots.length; i++) {
                 const productDocSnapshot = productDocsSnapshots[i];
-                const { ref: productRef, quantitySold, id: productId } = productUpdates[i];
+                const operation = productReadOperations.find(op => op.ref.path === productDocSnapshot.ref.path); // Find corresponding operation data
+
+                if (!operation) {
+                    console.warn(`(Webhook) [TXN_WRITE_WARN] Could not find original operation for product snapshot: ${productDocSnapshot.id}`);
+                    continue;
+                }
+                
+                const { ref: productRef, id: productId, quantitySold } = operation;
 
                 if (!productDocSnapshot.exists) {
-                    console.warn(`(Webhook) Product with ID ${productId} not found for stock update.`);
+                    console.warn(`(Webhook) [TXN_WRITE_WARN] Product with ID ${productId} (order ${firebaseOrderId}) not found during write phase. Stock not updated.`);
                     continue;
                 }
 
-                const currentStock = productDocSnapshot.data().stock;
+                const productData = productDocSnapshot.data();
+                const currentStock = productData.stock;
+
                 if (typeof currentStock !== 'number') {
-                    console.warn(`(Webhook) Product ${productId} has invalid stock value: ${currentStock}. Skipping stock update.`);
+                    console.warn(`(Webhook) [TXN_WRITE_WARN] Product ${productId} (order ${firebaseOrderId}) has invalid stock value: ${currentStock}. Stock not updated.`);
                     continue;
                 }
 
                 const newStock = currentStock - quantitySold;
+                console.log(`(Webhook) [TXN_WRITE] Updating stock for product ${productId} (order ${firebaseOrderId}): from ${currentStock} to ${newStock}.`);
                 transaction.update(productRef, { stock: newStock });
-                console.log(`(Webhook) Updated stock for product ${productId} from ${currentStock} to ${newStock}.`);
             }
-        } else {
-            console.log("(Webhook) No valid products found in order to update stock.");
-        }
-      });
-      console.log(`(Webhook) Firestore transaction completed for order ${firebaseOrderId}.`);
-      res.json({ received: true, processed: true, message: "Payment processed successfully." });
+            console.log(`(Webhook) [TXN_WRITE_COMPLETE] All writes finished for order ${firebaseOrderId}.`);
+        }); // End of db.runTransaction
+
+        console.log(`(Webhook) Firestore transaction SUCCEEDED for order ${firebaseOrderId}.`);
+        res.json({ received: true, processed: true, message: "Payment processed successfully." });
 
     } catch (transactionError) {
-      console.error(`(Webhook) Firestore transaction error for order ${firebaseOrderId}:`, transactionError);
-      // Decide if this is a temporary error (5xx to retry) or permanent (4xx)
-      res.status(500).send("Error processing payment update in database.");
+        console.error(`(Webhook) Firestore transaction FAILED for order ${firebaseOrderId}:`, transactionError.message);
+        // Log the full error for more details if needed
+        // console.error(transactionError); 
+        res.status(500).send(`Error processing payment update in database: ${transactionError.message}`);
     }
-  } else if (event.type === "payment.failed") {
-    const paymentPayload = event.payload;
-    const firebaseOrderId = paymentPayload.metadata?.firebase_order_id;
-    console.log(`(Webhook) Payment failed for Firebase Order ID: ${firebaseOrderId}.`);
-    if (firebaseOrderId) {
-        try {
-            await db.collection("orders").doc(firebaseOrderId).update({
-                status: "failed",
-                yocoPaymentId: paymentPayload.id,
-                paymentStatusYoco: paymentPayload.status,
-                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-                webhookEventId: event.id
-            });
-            console.log(`(Webhook) Order ${firebaseOrderId} status updated to failed.`);
-        } catch(updateError) {
-            console.error(`(Webhook) Error updating order ${firebaseOrderId} to failed:`, updateError);
-        }
-    }
-    res.json({ received: true, processed: "failed_payment_logged" });
-  }
-  else {
+} else {
+    // ... your existing handling for other event types ...
     console.log(`(Webhook) Event type ${event.type} not handled.`);
     res.json({ received: true, processed: false, message: `Event type ${event.type} not handled.` });
-  }
-});
-
+}
+ });
 // Success page
 app.get("/yoco-payment-success", (req, res) => {
   const orderId = req.query.orderId || "unknown";
