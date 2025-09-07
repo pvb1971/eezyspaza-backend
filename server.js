@@ -52,10 +52,12 @@ app.post("/create-checkout", async (req, res) => {
     // based on metadata.
 
     const amountInCents = Math.round(parseFloat(amount) * 100);
-
+    console.log("[Server /create-checkout] Received amount from client:", amount);
+    console.log("[Server /create-checkout] Calculated amountInCents for Yoco:", amountInCents);
+        
     const yocoPayload = {
       amount: amountInCents, // Yoco typically expects amount in cents
-      currency: "ZAR",
+      currency: "ZAR", // This is hardcoded
       metadata: {
         firebase_order_id: orderIdForYoco, // This ID will be used by the webhook
         items: JSON.stringify(items.map(item => ({ id: item.id, name: item.name, quantity: item.quantity, price: item.price }))), // Stringify items for metadata
@@ -69,7 +71,7 @@ app.post("/create-checkout", async (req, res) => {
       cancel_url: `https://eezyspaza-backend1.onrender.com/yoco-payment-cancel?orderId=${orderIdForYoco}&status=cancelled`,
       failure_url: `https://eezyspaza-backend1.onrender.com/yoco-payment-failure?orderId=${orderIdForYoco}&status=failed`, // Good to have a failure URL too
     };
-
+    console.log("[Server /create-checkout] Sending this payload to Yoco:", JSON.stringify(yocoPayload, null, 2));
     console.log("Sending payload to Yoco:", JSON.stringify(yocoPayload, null, 2));
 
     // IMPORTANT: Verify this is the correct Yoco endpoint for initiating an online redirect checkout.
