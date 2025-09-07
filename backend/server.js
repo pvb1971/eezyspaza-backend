@@ -1,5 +1,5 @@
 // At the VERY TOP of server.js (after imports, before any other code)
-console.log("SERVER.JS VERSION: 2025-09-07-06:45:00 - DEPLOYED AND RUNNING"); // Replace YOUR_TIME_HERE
+console.log("SERVER.JS VERSION: 2025-09-07-20:05:00 - DEPLOYED AND RUNNING"); // Replace YOUR_TIME_HERE
 
 import express from "express";
 import bodyParser from "body-parser";
@@ -8,31 +8,57 @@ import fetch from "node-fetch";
 import dotenv from "dotenv";
 import crypto from "crypto";
 import admin from "firebase-admin";
+import fs from 'fs'; // Import the File System module
+// import path from 'path'; // Path module can be useful but not strictly needed here
 
-dotenv.config();
+dotenv.config(); // For local development, it can still load a .env file
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(bodyParser.json()); // Use bodyParser.json() for routes that expect JSON (like /create-checkout)
 
-// Firebase Admin init
+// Firebase Admin init - Modified to prioritize Render Secret Files
 if (!admin.apps.length) {
   try {
-    const serviceAccountString = process.env.FIREBASE_SERVICE_ACCOUNT;
-    if (!serviceAccountString) {
-        console.error("FIREBASE_SERVICE_ACCOUNT environment variable is not set or is empty.");
-        process.exit(1);
+    // Define the path to your secret file in Render
+    // THIS FILENAME MUST MATCH THE "Filename on instance" IN RENDER'S SECRET FILES SETTINGS
+    const serviceAccountPath = '/etc/secrets/firebase-service-account-key.json';
+
+    console.log(`[Firebase Init] Attempting to load service account. Preferred path: ${serviceAccountPath}`);
+
+    if (fs.existsSync(serviceAccountPath)) {
+      console.log(`[Firebase Init] Service account file found at ${serviceAccountPath}. Reading and parsing...`);
+      const serviceAccountJsonString = fs.readFileSync(serviceAccountPath, 'utf8');
+      const serviceAccount = JSON.parse(serviceAccountJsonString); // Parse the file's content
+
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+      });
+      console.log("Firebase Admin initialized successfully using Secret File.");
+    } else {
+      console.warn(`[Firebase Init] Secret file NOT found at ${serviceAccountPath}.`);
+      console.warn("[Firebase Init] Attempting fallback to FIREBASE_SERVICE_ACCOUNT environment variable (for local development or alternative setup).");
+
+      const serviceAccountStringFromEnv = process.env.FIREBASE_SERVICE_ACCOUNT;
+      if (serviceAccountStringFromEnv && serviceAccountStringFromEnv.trim() !== "" && serviceAccountStringFromEnv !== "undefined") {
+        console.log("[Firebase Init] Fallback: Found FIREBASE_SERVICE_ACCOUNT environment variable. Parsing...");
+        const serviceAccountFromEnv = JSON.parse(serviceAccountStringFromEnv);
+        admin.initializeApp({
+          credential: admin.credential.cert(serviceAccountFromEnv),
+        });
+        console.log("Firebase Admin initialized successfully using FIREBASE_SERVICE_ACCOUNT environment variable (fallback).");
+      } else {
+        console.error(`[Firebase Init] CRITICAL FAILURE: Service account file NOT found at ${serviceAccountPath} AND FIREBASE_SERVICE_ACCOUNT env var is not set or is invalid. Firebase Admin cannot be initialized.`);
+        console.error("[Firebase Init] Please ensure your 'firebase-service-account-key.json' is correctly uploaded as a Secret File in Render OR FIREBASE_SERVICE_ACCOUNT env var is correctly set for local dev.");
+        process.exit(1); // Exit if no valid config found
+      }
     }
-    const serviceAccount = JSON.parse(serviceAccountString);
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-    });
-    console.log("Firebase Admin initialized successfully.");
   } catch (error) {
-    console.error("Error initializing Firebase Admin:", error.message, error);
-    // Log the problematic string if parsing failed (be careful with sensitive data in logs)
-    // console.error("Problematic FIREBASE_SERVICE_ACCOUNT string (first 100 chars):", process.env.FIREBASE_SERVICE_ACCOUNT ? process.env.FIREBASE_SERVICE_ACCOUNT.substring(0, 100) : "Not set");
+    console.error("[Firebase Init] CRITICAL ERROR during Firebase Admin initialization:", error.message, error);
+    if (error instanceof SyntaxError) {
+        console.error("[Firebase Init] This often means the service account JSON (from file or env var) is malformed or not valid JSON.");
+    }
     process.exit(1);
   }
 }
@@ -40,7 +66,7 @@ const db = admin.firestore();
 
 // Create checkout
 app.post("/create-checkout", async (req, res) => {
-  console.log("-----> /create-checkout ROUTE HIT! Version 2025-09-07-YOUR_TIME_HERE <-----"); // Match top-level version
+  console.log("-----> /create-checkout ROUTE HIT! Version YYYY-MM-DD-YOUR_TIME_HERE <-----"); // Match top-level version
 
   try {
     console.log("[Server /create-checkout] Received req.body:", JSON.stringify(req.body, null, 2));
@@ -49,14 +75,14 @@ app.post("/create-checkout", async (req, res) => {
     console.log("[Server /create-checkout] Extracted 'amount' from req.body:", amount);
     console.log("[Server /create-checkout] Extracted 'items' from req.body:", items ? `${items.length} items` : "items not found/undefined");
 
-    if (!amount || typeof amount !== 'string' || amount.trim() === "" || // Ensure amount is a non-empty string
+    if (!amount || typeof amount !== 'string' || amount.trim() === "" ||
         !items || !Array.isArray(items) || items.length === 0) {
       console.error("[Server /create-checkout] Validation FAILED: Missing or invalid required fields. Amount:", amount, "Items:", items);
       return res.status(400).json({ error: "Missing required fields: amount (string) and items array (non-empty)." });
     }
     console.log("[Server /create-checkout] Initial validation passed (amount and items presence).");
 
-    const orderIdForYoco = firebase_order_id_from_app || db.collection("orders").doc().id; // Use 'orders' or a temp collection
+    const orderIdForYoco = firebase_order_id_from_app || db.collection("orders").doc().id;
 
     const parsedAmountFloat = parseFloat(amount);
     console.log("[Server /create-checkout] Parsed client amount to float:", parsedAmountFloat);
@@ -76,14 +102,14 @@ app.post("/create-checkout", async (req, res) => {
 
     const yocoPayload = {
       amount: amountInCents,
-      currency: "ZAR", // This is hardcoded
+      currency: "ZAR",
       metadata: {
         firebase_order_id: orderIdForYoco,
         items: JSON.stringify(items.map(item => ({
-            id: String(item.id), // Ensure IDs are strings
+            id: String(item.id),
             name: item.name,
-            quantity: parseInt(item.quantity), // Ensure quantity is int
-            price: String(item.price) // Ensure price is string
+            quantity: parseInt(item.quantity),
+            price: String(item.price)
         }))),
         customer_name: customer_name || "Valued Customer",
       },
@@ -116,7 +142,6 @@ app.post("/create-checkout", async (req, res) => {
         errorDataFromYoco = { message: "Failed to parse Yoco error response or Yoco returned non-JSON error.", details: yocoResponseText };
       }
       console.error("[Server /create-checkout] Error from Yoco API:", JSON.stringify(errorDataFromYoco, null, 2));
-      // Send Yoco's error message back to the client if possible
       return res.status(yocoApiResponse.status).json(
         errorDataFromYoco.success === false ? errorDataFromYoco : {
             error: "Failed to create Yoco checkout",
@@ -143,20 +168,13 @@ app.post("/create-checkout", async (req, res) => {
   }
 });
 
-
-// Webhook - Using bodyParser.raw for signature verification
-// Place this BEFORE app.use(bodyParser.json()) if you have specific raw body needs for one route
-// and JSON for others. Or define it like this if it's the only raw consumer.
-// However, since app.use(bodyParser.json()) is global, we need to handle this carefully.
-// The common pattern is to define raw body parsing specifically for the webhook route.
+// Webhook
 const rawBodyWebhookParser = bodyParser.raw({ type: "application/json" });
-
 app.post("/webhook", rawBodyWebhookParser, async (req, res) => {
-  console.log("-----> /webhook ROUTE HIT! Version 2025-09-07-YOUR_TIME_HERE <-----"); // Match top-level version
-  console.log("INCOMING WEBHOOK REQUEST: POST /webhook");
+  console.log("-----> /webhook ROUTE HIT! Version YYYY-MM-DD-YOUR_TIME_HERE <-----"); // Match top-level version
+  console.log("(Webhook) INCOMING WEBHOOK REQUEST: POST /webhook");
   const sig = req.headers["yoco-signature"];
 
-  // req.body should be a Buffer due to bodyParser.raw
   if (!Buffer.isBuffer(req.body)) {
       console.error("(Webhook) Error: req.body is not a Buffer. Check bodyParser configuration for /webhook.");
       return res.status(500).send("Webhook internal server error: Invalid body type.");
@@ -175,11 +193,12 @@ app.post("/webhook", rawBodyWebhookParser, async (req, res) => {
   try {
     const expectedSig = crypto
       .createHmac("sha256", process.env.YOCO_WEBHOOK_SECRET)
-      .update(payloadString) // Use the string form of the payload for HMAC
+      .update(payloadString)
       .digest("hex");
 
     if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) {
-      console.warn(`⚠️ (Webhook) Signature mismatch. Expected: ${expectedSig}, Got: ${sig}. Payload string: ${payloadString}`);
+      console.warn(`⚠️ (Webhook) Signature mismatch. Expected: ${expectedSig}, Got: ${sig}.`);
+      // console.debug("(Webhook) Payload for signature mismatch:", payloadString); // Uncomment for deep debugging if necessary
       return res.status(400).send("Invalid signature");
     }
   } catch(hmacError) {
@@ -198,7 +217,6 @@ app.post("/webhook", rawBodyWebhookParser, async (req, res) => {
   }
 
   console.log(`(Webhook) Processing event type: ${event.type}. Event ID: ${event.id}`);
-  // console.log("(Webhook) Full event payload:", JSON.stringify(event, null, 2));
 
   if (event.type === "payment.succeeded") {
     const paymentPayload = event.payload;
@@ -211,21 +229,19 @@ app.post("/webhook", rawBodyWebhookParser, async (req, res) => {
     }
     if (!itemsString) {
         console.warn(`(Webhook) 'items' string missing in payment metadata for order ${firebaseOrderId}, event ${event.id}. Stock will not be updated.`);
-        // Decide if this is a fatal error or if order status can still be updated.
-        // For now, proceeding to update order status but skipping stock.
     }
 
-    let items = []; // Default to empty array if itemsString is missing
+    let items = [];
     if (itemsString) {
         try {
             items = JSON.parse(itemsString);
             if (!Array.isArray(items)) {
-                console.warn(`(Webhook) Parsed 'items' for order ${firebaseOrderId} is not an array. Items string: ${itemsString}. Stock will not be updated.`);
-                items = []; // Reset to empty if not an array
+                console.warn(`(Webhook) Parsed 'items' for order ${firebaseOrderId} is not an array. Stock will not be updated. Items string: ${itemsString}`);
+                items = [];
             }
         } catch (e) {
-            console.error(`(Webhook) Error parsing 'items' metadata for order ${firebaseOrderId}: ${e.message}. Items string: ${itemsString}. Stock will not be updated.`);
-            items = []; // Reset to empty on error
+            console.error(`(Webhook) Error parsing 'items' metadata for order ${firebaseOrderId}: ${e.message}. Stock will not be updated. Items string: ${itemsString}`);
+            items = [];
         }
     }
 
@@ -233,26 +249,20 @@ app.post("/webhook", rawBodyWebhookParser, async (req, res) => {
     try {
         await db.runTransaction(async (transaction) => {
             console.log(`(Webhook) [TXN_START] Order: ${firebaseOrderId}`);
-
-            // --- PHASE 1: ALL READS ---
-            console.log(`(Webhook) [TXN_DEBUG] Attempting GET for order: orders/${firebaseOrderId}`);
             const orderRef = db.collection("orders").doc(firebaseOrderId);
+            console.log(`(Webhook) [TXN_DEBUG] Attempting GET for order: ${orderRef.path}`);
             const orderDoc = await transaction.get(orderRef);
-            console.log(`(Webhook) [TXN_DEBUG] Completed GET for order: orders/${firebaseOrderId}. Exists: ${orderDoc.exists}`);
+            console.log(`(Webhook) [TXN_DEBUG] Completed GET for order: ${orderRef.path}. Exists: ${orderDoc.exists}`);
 
             const productReadOperations = [];
-            if (items.length > 0) { // Only attempt product reads if items array is valid and populated
+            if (items.length > 0) {
                 for (const item of items) {
                     if (!item.id || typeof item.quantity === 'undefined' || parseInt(item.quantity) <= 0) {
                         console.warn(`(Webhook) [TXN_INFO] Order ${firebaseOrderId}: Item missing id, quantity, or quantity is zero/invalid. Skipping stock update for:`, item);
                         continue;
                     }
                     const productRef = db.collection("products").doc(String(item.id));
-                    productReadOperations.push({
-                        ref: productRef,
-                        id: String(item.id),
-                        quantitySold: parseInt(item.quantity, 10)
-                    });
+                    productReadOperations.push({ ref: productRef, id: String(item.id), quantitySold: parseInt(item.quantity, 10) });
                 }
             } else {
                  console.log(`(Webhook) [TXN_INFO] Order ${firebaseOrderId}: No valid items for stock processing.`);
@@ -267,28 +277,25 @@ app.post("/webhook", rawBodyWebhookParser, async (req, res) => {
             } else {
                 console.log(`(Webhook) [TXN_INFO] Order ${firebaseOrderId}: No product read operations prepared for stock update.`);
             }
-
             console.log(`(Webhook) [TXN_READ_COMPLETE] All reads finished for order ${firebaseOrderId}.`);
 
-            // --- PHASE 2: ALL WRITES ---
             console.log(`(Webhook) [TXN_WRITE_START] Starting writes for order ${firebaseOrderId}.`);
-
             const orderWriteData = {
                 yocoPaymentId: paymentPayload.id,
                 yocoCheckoutId: paymentPayload.metadata?.checkoutId,
-                amount: paymentPayload.amount / 100, // Assuming Yoco amount is in cents
+                amount: paymentPayload.amount / 100,
                 currency: paymentPayload.currency,
-                status: "paid", // Consistent status
-                items: items, // Store the parsed (and potentially validated) items array
+                status: "paid",
+                items: items,
                 customerName: paymentPayload.metadata?.customer_name || "Valued Customer",
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
                 webhookEventId: event.id,
-                paymentStatusYoco: paymentPayload.status // Store Yoco's status too
+                paymentStatusYoco: paymentPayload.status
             };
 
             if (!orderDoc.exists) {
                 console.log(`(Webhook) [TXN_WRITE] Order ${firebaseOrderId} not found, creating new document.`);
-                orderWriteData.createdAt = admin.firestore.FieldValue.serverTimestamp(); // Set only on creation
+                orderWriteData.createdAt = admin.firestore.FieldValue.serverTimestamp();
                 console.log(`(Webhook) [TXN_DEBUG] Attempting SET on order: ${orderRef.path}`);
                 transaction.set(orderRef, orderWriteData);
                 console.log(`(Webhook) [TXN_DEBUG] Enqueued SET on order: ${orderRef.path}`);
@@ -304,41 +311,32 @@ app.post("/webhook", rawBodyWebhookParser, async (req, res) => {
                 for (let i = 0; i < productDocsSnapshots.length; i++) {
                     const productDocSnapshot = productDocsSnapshots[i];
                     const operation = productReadOperations.find(op => op.ref.path === productDocSnapshot.ref.path);
-
                     if (!operation) {
-                        console.warn(`(Webhook) [TXN_WRITE_WARN] Could not find original operation for product snapshot: ${productDocSnapshot.id} for order ${firebaseOrderId}. Skipping stock update for this item.`);
+                        console.warn(`(Webhook) [TXN_WRITE_WARN] Could not find original operation for product snapshot: ${productDocSnapshot.id} for order ${firebaseOrderId}. Skipping stock update.`);
                         continue;
                     }
-
                     const { ref: productRef, id: productId, quantitySold } = operation;
-
                     if (!productDocSnapshot.exists) {
-                        console.warn(`(Webhook) [TXN_WRITE_WARN] Product with ID ${productId} (order ${firebaseOrderId}) not found in DB during write phase. Stock not updated.`);
+                        console.warn(`(Webhook) [TXN_WRITE_WARN] Product ${productId} (order ${firebaseOrderId}) not found in DB during write phase. Stock not updated.`);
                         continue;
                     }
-
                     const productData = productDocSnapshot.data();
                     const currentStock = productData.stock;
-
                     if (typeof currentStock !== 'number' || isNaN(currentStock)) {
                         console.warn(`(Webhook) [TXN_WRITE_WARN] Product ${productId} (order ${firebaseOrderId}) has invalid stock value in DB: '${currentStock}'. Stock not updated.`);
                         continue;
                     }
-
                     const newStock = currentStock - quantitySold;
-                    console.log(`(Webhook) [TXN_WRITE] Stock update for product ${productId} (order ${firebaseOrderId}): from ${currentStock} to ${newStock}. Quantity sold: ${quantitySold}`);
-
+                    console.log(`(Webhook) [TXN_WRITE] Stock update for product ${productId} (order ${firebaseOrderId}): from ${currentStock} to ${newStock}. Sold: ${quantitySold}`);
                     console.log(`(Webhook) [TXN_DEBUG] Attempting UPDATE on product: ${productRef.path} with new stock: ${newStock}`);
                     transaction.update(productRef, { stock: newStock, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
                     console.log(`(Webhook) [TXN_DEBUG] Enqueued UPDATE on product: ${productRef.path}`);
                 }
             }
             console.log(`(Webhook) [TXN_WRITE_COMPLETE] All writes finished for order ${firebaseOrderId}.`);
-        }); // End of db.runTransaction
-
+        });
         console.log(`(Webhook) Firestore transaction SUCCEEDED for order ${firebaseOrderId}.`);
         res.status(200).json({ received: true, processed: true, message: "Payment processed and order updated successfully." });
-
     } catch (transactionError) {
         console.error(`(Webhook) Firestore transaction FAILED for order ${firebaseOrderId}:`, transactionError.message, transactionError);
         res.status(500).send(`Webhook Error: Error processing payment update in database: ${transactionError.message}`);
@@ -354,48 +352,21 @@ app.get("/yoco-payment-success", (req, res) => {
   const orderId = req.query.orderId || "unknown";
   const status = req.query.status || "success";
   console.log(`Serving /yoco-payment-success page for Order ID: ${orderId}, Status: ${status}`);
-  // (Your HTML for success page as before)
-  res.send(`
-    <html><head><title>Payment Successful</title><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; padding: 20px; box-sizing: border-box; } h1 { color: #4CAF50; } p { font-size: 1.2em; } .button-container { margin-top: 20px; } .app-button { padding: 10px 20px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px; font-size: 1em; }</style></head>
-    <body><h1>✅ Payment Successful!</h1><p>Your order (ID: ${orderId}) has been processed.</p><p>Thank you for your purchase.</p><div class="button-container"><a href="eezyspaza://payment-complete?status=success&orderId=${orderId}" class="app-button">Return to App</a></div>
-    <script>
-      console.log('Success page script running for order: ${orderId}');
-      if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
-        console.log('Posting message to ReactNativeWebView: paymentSuccess');
-        window.ReactNativeWebView.postMessage(JSON.stringify({type: "paymentSuccess", orderId: "${orderId}",status: "success"}));
-      } else { console.log('ReactNativeWebView not available for postMessage on success page.'); }
-      setTimeout(function() { console.log('Attempting deep link redirect from success page to eezyspaza://payment-complete'); window.location.href = "eezyspaza://payment-complete?status=success&orderId=${orderId}"; }, 1500);
-    </script></body></html>`);
+  res.send(`<html><head><title>Payment Successful</title><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; padding: 20px; box-sizing: border-box; } h1 { color: #4CAF50; } p { font-size: 1.2em; } .button-container { margin-top: 20px; } .app-button { padding: 10px 20px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px; font-size: 1em; }</style></head><body><h1>✅ Payment Successful!</h1><p>Your order (ID: ${orderId}) has been processed.</p><p>Thank you for your purchase.</p><div class="button-container"><a href="eezyspaza://payment-complete?status=success&orderId=${orderId}" class="app-button">Return to App</a></div><script>console.log('Success page script running for order: ${orderId}'); if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) { console.log('Posting message to ReactNativeWebView: paymentSuccess'); window.ReactNativeWebView.postMessage(JSON.stringify({type: "paymentSuccess", orderId: "${orderId}",status: "success"})); } else { console.log('ReactNativeWebView not available for postMessage on success page.'); } setTimeout(function() { console.log('Attempting deep link redirect from success page to eezyspaza://payment-complete'); window.location.href = "eezyspaza://payment-complete?status=success&orderId=${orderId}"; }, 1500);</script></body></html>`);
 });
 
 // Cancel page
 app.get("/yoco-payment-cancel", (req, res) => {
   const orderId = req.query.orderId || "unknown";
   console.log(`Serving /yoco-payment-cancel page for Order ID: ${orderId}`);
-  // (Your HTML for cancel page as before)
-  res.status(200).send(`
-    <html><head><title>Payment Cancelled</title><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body { font-family: sans-serif; text-align: center; padding-top: 50px; } h1 { color: #f44336; }</style></head>
-    <body><h1>❌ Payment Cancelled</h1><p>Your payment for order ID ${orderId} was cancelled.</p><a href="eezyspaza://payment-complete?status=cancelled&orderId=${orderId}">Return to App</a>
-    <script>
-      console.log('Cancel page script running for order: ${orderId}');
-      if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) { window.ReactNativeWebView.postMessage(JSON.stringify({ type: "paymentCancel", orderId: "${orderId}", status: "cancelled" }));}
-      setTimeout(function() { console.log('Attempting deep link redirect from cancel page.'); window.location.href = "eezyspaza://payment-complete?status=cancelled&orderId=${orderId}"; }, 1500);
-    </script></body></html>`);
+  res.status(200).send(`<html><head><title>Payment Cancelled</title><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body { font-family: sans-serif; text-align: center; padding-top: 50px; } h1 { color: #f44336; }</style></head><body><h1>❌ Payment Cancelled</h1><p>Your payment for order ID ${orderId} was cancelled.</p><a href="eezyspaza://payment-complete?status=cancelled&orderId=${orderId}">Return to App</a><script>console.log('Cancel page script running for order: ${orderId}'); if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) { window.ReactNativeWebView.postMessage(JSON.stringify({ type: "paymentCancel", orderId: "${orderId}", status: "cancelled" }));} setTimeout(function() { console.log('Attempting deep link redirect from cancel page.'); window.location.href = "eezyspaza://payment-complete?status=cancelled&orderId=${orderId}"; }, 1500);</script></body></html>`);
 });
 
 // Failure page
 app.get("/yoco-payment-failure", (req, res) => {
     const orderId = req.query.orderId || "unknown";
     console.log(`Serving /yoco-payment-failure page for Order ID: ${orderId}`);
-    // (Your HTML for failure page as before)
-    res.status(200).send(`
-    <html><head><title>Payment Failed</title><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body { font-family: sans-serif; text-align: center; padding-top: 50px; } h1 { color: #f44336; }</style></head>
-    <body><h1>❗ Payment Failed</h1><p>There was an issue with your payment for order ID ${orderId}. Please try again or contact support.</p><a href="eezyspaza://payment-complete?status=failed&orderId=${orderId}">Return to App</a>
-    <script>
-      console.log('Failure page script running for order: ${orderId}');
-      if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) { window.ReactNativeWebView.postMessage(JSON.stringify({ type: "paymentFailure", orderId: "${orderId}", status: "failed" }));}
-       setTimeout(function() { console.log('Attempting deep link redirect from failure page.'); window.location.href = "eezyspaza://payment-complete?status=failed&orderId=${orderId}"; }, 1500);
-    </script></body></html>`);
+    res.status(200).send(`<html><head><title>Payment Failed</title><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body { font-family: sans-serif; text-align: center; padding-top: 50px; } h1 { color: #f44336; }</style></head><body><h1>❗ Payment Failed</h1><p>There was an issue with your payment for order ID ${orderId}. Please try again or contact support.</p><a href="eezyspaza://payment-complete?status=failed&orderId=${orderId}">Return to App</a><script>console.log('Failure page script running for order: ${orderId}'); if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) { window.ReactNativeWebView.postMessage(JSON.stringify({ type: "paymentFailure", orderId: "${orderId}", status: "failed" }));} setTimeout(function() { console.log('Attempting deep link redirect from failure page.'); window.location.href = "eezyspaza://payment-complete?status=failed&orderId=${orderId}"; }, 1500);</script></body></html>`);
 });
 
 // Start server
