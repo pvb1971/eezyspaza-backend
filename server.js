@@ -1,5 +1,5 @@
 // server.js
-// SERVER.JS VERSION: 2025-09-13-18:00:00 - UPDATED FOR YOCO AMOUNT FIX AND PAYLOAD OPTIMIZATION
+// SERVER.JS VERSION: 2025-09-13-18:30:00 - FIXED ITEMS EXTRACTION FROM METADATA
 
 import express from "express";
 import bodyParser from "body-parser";
@@ -58,43 +58,58 @@ const db = admin.firestore();
 
 // Updated /create-checkout Endpoint
 app.post("/create-checkout", async (req, res) => {
-    console.log("-----> /create-checkout ROUTE HIT! Version 2025-09-13-18:00:00 <-----");
+    console.log("-----> /create-checkout ROUTE HIT! Version 2025-09-13-18:30:00 <-----");
     try {
         console.log("[Server /create-checkout] Received req.body:", JSON.stringify(req.body, null, 2));
-        const { amount, items, customer_name, firebase_order_id_from_app } = req.body;
+        const { amount, currency, successUrl, cancelUrl, failureUrl, metadata } = req.body;
 
-        // Validate input
+        // Validate top-level fields
         if (!amount || (typeof amount !== 'string' && typeof amount !== 'number') || amount.toString().trim() === "") {
             console.error("[Server /create-checkout] Validation FAILED: Missing or invalid amount:", amount);
             return res.status(400).json({ error: "Amount is required and must be a non-empty string or number." });
         }
+        if (!currency || typeof currency !== 'string' || currency.trim() === "") {
+            console.error("[Server /create-checkout] Validation FAILED: Missing or invalid currency:", currency);
+            return res.status(400).json({ error: "Currency is required and must be a non-empty string." });
+        }
+        if (!successUrl || !cancelUrl || !failureUrl) {
+            console.error("[Server /create-checkout] Validation FAILED: Missing URLs:", { successUrl, cancelUrl, failureUrl });
+            return res.status(400).json({ error: "Success, cancel, and failure URLs are required." });
+        }
+        if (!metadata || typeof metadata !== 'object') {
+            console.error("[Server /create-checkout] Validation FAILED: Missing or invalid metadata:", metadata);
+            return res.status(400).json({ error: "Metadata is required and must be an object." });
+        }
+
+        // Extract and validate items from metadata
+        const { items, order_reference, customer_name } = metadata;
+        let parsedItems = items;
         if (!items || (typeof items === 'string' && items.trim() === "") || (Array.isArray(items) && items.length === 0)) {
-            console.error("[Server /create-checkout] Validation FAILED: Missing or invalid items:", items);
-            return res.status(400).json({ error: "Items are required and must be a non-empty array or valid JSON string." });
+            console.error("[Server /create-checkout] Validation FAILED: Missing or invalid items in metadata:", items);
+            return res.status(400).json({ error: "Items in metadata are required and must be a non-empty array or valid JSON string." });
         }
 
         // Parse items if string
-        let parsedItems = items;
         if (typeof items === 'string') {
             try {
                 parsedItems = JSON.parse(items);
-                console.log("[Server /create-checkout] Parsed stringified 'items' to array:", parsedItems);
+                console.log("[Server /create-checkout] Parsed stringified 'items' from metadata to array:", parsedItems);
             } catch (e) {
-                console.error("[Server /create-checkout] Failed to parse 'items' string:", e.message);
-                return res.status(400).json({ error: "Invalid items format: must be a valid JSON array" });
+                console.error("[Server /create-checkout] Failed to parse 'items' string from metadata:", e.message);
+                return res.status(400).json({ error: "Invalid items format in metadata: must be a valid JSON array" });
             }
         }
 
         // Validate parsed items
         if (!Array.isArray(parsedItems) || parsedItems.length === 0) {
             console.error("[Server /create-checkout] Validation FAILED: Parsed items is not a non-empty array:", parsedItems);
-            return res.status(400).json({ error: "Items must be a non-empty array." });
+            return res.status(400).json({ error: "Items in metadata must be a non-empty array." });
         }
 
         console.log("[Server /create-checkout] Extracted 'amount':", amount, "Items:", `${parsedItems.length} items`);
 
         // Generate or use provided order ID
-        const orderIdForYoco = firebase_order_id_from_app || db.collection("orders").doc().id;
+        const orderIdForYoco = order_reference || db.collection("orders").doc().id;
         console.log("[Server /create-checkout] Using orderIdForYoco:", orderIdForYoco);
 
         // Convert amount to cents
@@ -121,7 +136,7 @@ app.post("/create-checkout", async (req, res) => {
         // Construct Yoco payload
         const yocoPayload = {
             amount: amountInCents,
-            currency: "ZAR",
+            currency: currency,
             metadata: {
                 order_reference: orderIdForYoco,
                 customer_name: customer_name || "Valued Customer",
@@ -130,12 +145,12 @@ app.post("/create-checkout", async (req, res) => {
                     name: item.name || "Unknown Item",
                     quantity: parseInt(item.quantity) || 1,
                     price: String(item.price || "0")
-                }))), // Store items in metadata for reference
+                }))),
             },
             paymentType: "card",
-            successUrl: `https://eezyspaza-backend1.onrender.com/yoco-payment-success?orderId=${orderIdForYoco}&status=success`,
-            cancelUrl: `https://eezyspaza-backend1.onrender.com/yoco-payment-cancel?orderId=${orderIdForYoco}&status=cancelled`,
-            failureUrl: `https://eezyspaza-backend1.onrender.com/yoco-payment-failure?orderId=${orderIdForYoco}&status=failed`,
+            successUrl: successUrl,
+            cancelUrl: cancelUrl,
+            failureUrl: failureUrl,
         };
         console.log("[Server /create-checkout] Sending to Yoco:", JSON.stringify(yocoPayload, null, 2));
 
@@ -183,7 +198,7 @@ app.post("/create-checkout", async (req, res) => {
             await orderRef.set({
                 amount: parsedAmountFloat,
                 amountInCents: amountInCents,
-                currency: "ZAR",
+                currency: currency,
                 items: parsedItems,
                 customerName: customer_name || "Valued Customer",
                 status: "pending",
@@ -206,10 +221,10 @@ app.post("/create-checkout", async (req, res) => {
     }
 });
 
-// Webhook and other endpoints (unchanged)
+// Webhook and other endpoints (unchanged, except for metadata.order_reference)
 const rawBodyWebhookParser = bodyParser.raw({ type: "application/json" });
 app.post("/webhook", rawBodyWebhookParser, async (req, res) => {
-    console.log("-----> /webhook ROUTE HIT! Version 2025-09-13-18:00:00 <-----");
+    console.log("-----> /webhook ROUTE HIT! Version 2025-09-13-18:30:00 <-----");
     console.log("(Webhook) INCOMING WEBHOOK REQUEST: POST /webhook");
     const sig = req.headers["yoco-signature"];
 
