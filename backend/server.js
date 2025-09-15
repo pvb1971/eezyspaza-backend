@@ -1,4 +1,4 @@
-// SERVER.JS VERSION: 2025-09-15-07:30:00 - FIXED Updated for Yoco redirects
+// SERVER.JS VERSION: 2025-09-15-07:30:00 - FIXED Yoco API endpoint URL
 // Enhanced Yoco Checkout API with comprehensive error handling, security, and debugging
 // Dependencies: express, node-fetch (or built-in fetch), crypto for webhook verification
 
@@ -9,7 +9,7 @@ const fetch = require('node-fetch'); // Required for Node.js < 18; remove if usi
 
 // Initialize express app
 const app = express();
-app.use(express.static('public')); // Serve files from public folder
+app.use(express.static('public')); // Serve static files from public folder
 
 // Load environment variables
 dotenv.config();
@@ -148,16 +148,34 @@ app.post('/create-checkout', async (req, res) => {
         // Prepare Yoco payload with proper structure
         const yocoPayload = {
             amount: amountInCents,
-            currency: req.body.currency || 'ZAR',
-            cancelUrl: req.body.cancelUrl,
-            successUrl: req.body.successUrl,
-            ...(req.body.failureUrl && { failureUrl: req.body.failureUrl }),
-            metadata: {
-                order_reference: orderReference,
-                customer_name: req.body.metadata?.customer_name || 'Customer',
-                customer_email: req.body.metadata?.customer_email || '',
-                request_id: requestId,
-                timestamp: new Date().toISOString(),
+            currency: req.body.currency || 'ZAR',    
+            cancelUrl: 'https://eezyspaza-backend1.onrender.com/yocoS-payment-cancel',
+            successUrl: 'https://eezyspaza-backend1.onrender.com/yoco-payment-success',
+            failureUrl: 'https://eezyspaza-backend1.onrender.com/yoco-payment-failure',    metadata: {
+        order_reference: orderReference,
+        customer_name: req.body.metadata?.customer_name || 'Customer',
+        customer_email: req.body.metadata?.customer_email || '',
+        request_id: requestId,
+        timestamp: new Date().toISOString(),
+        item_count: req.body.items?.length || 0,
+        first_item: req.body.items?.[0]?.name?.substring(0, 50) || 'Item'
+    });
+});
+
+// Export configuration for use in other files
+module.exports = {
+    YOCO_CONFIG,
+    validateCheckoutInput,
+    makeYocoRequest
+};
+
+// Start the server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Yoco API endpoint: ${YOCO_CONFIG.API_BASE_URL}/checkouts`);
+    console.log(`API key configured: ${process.env.YOCO_SECRET_KEY ? 'Yes' : 'No'}`);
+});String(),
                 // Include limited item info if needed (keep under Yoco's metadata limits)
                 ...(req.body.items && req.body.items.length > 0 && {
                     item_count: req.body.items.length,
@@ -616,7 +634,7 @@ app.get('/yoco-payment-success', async (req, res) => {
             timestamp: new Date().toISOString()
         });
         
-        res.redirect(`https://your-frontend-domain.com/trolley.html?${successParams}`);
+        res.redirect(`/payment-success.html?${successParams}`);
         
     } catch (error) {
         console.error(`[${sessionId}] Error handling success redirect:`, error);
@@ -727,21 +745,4 @@ app.use('/yoco*', (error, req, res, next) => {
     res.status(500).json({
         error: 'Payment service error',
         message: 'An unexpected error occurred in the payment service',
-        timestamp: new Date().toISOString()
-    });
-});
-
-// Export configuration for use in other files
-module.exports = {
-    YOCO_CONFIG,
-    validateCheckoutInput,
-    makeYocoRequest
-};
-
-// Start the server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`Yoco API endpoint: ${YOCO_CONFIG.API_BASE_URL}/checkouts`);
-    console.log(`API key configured: ${process.env.YOCO_SECRET_KEY ? 'Yes' : 'No'}`);
-});
+        timestamp: new Date().toISO
