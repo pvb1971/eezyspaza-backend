@@ -1,4 +1,4 @@
-// SERVER.JS VERSION: 2025-09-15-07:30:00 - FIXED Yoco API endpoint URL
+// SERVER.JS VERSION: 2025-09-15-07:30:00 - FIXED Updated for Yoco redirects
 // Enhanced Yoco Checkout API with comprehensive error handling, security, and debugging
 // Dependencies: express, node-fetch (or built-in fetch), crypto for webhook verification
 
@@ -9,6 +9,7 @@ const fetch = require('node-fetch'); // Required for Node.js < 18; remove if usi
 
 // Initialize express app
 const app = express();
+app.use(express.static('public')); // Serve files from public folder
 
 // Load environment variables
 dotenv.config();
@@ -615,7 +616,7 @@ app.get('/yoco-payment-success', async (req, res) => {
             timestamp: new Date().toISOString()
         });
         
-        res.redirect(`/payment-success.html?${successParams}`);
+        res.redirect(`https://your-frontend-domain.com/trolley.html?${successParams}`);
         
     } catch (error) {
         console.error(`[${sessionId}] Error handling success redirect:`, error);
