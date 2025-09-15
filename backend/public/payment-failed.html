@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment Failed - EazySpaza</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #333;
+        }
+        
+        .container {
+            background: white;
+            padding: 3rem;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+            text-align: center;
+            max-width: 500px;
+            margin: 2rem;
+        }
+        
+        .error-icon {
+            font-size: 4rem;
+            color: #dc3545;
+            margin-bottom: 1.5rem;
+        }
+        
+        h1 {
+            color: #dc3545;
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            font-weight: 700;
+        }
+        
+        .message {
+            font-size: 1.2rem;
+            color: #666;
+            margin-bottom: 2rem;
+            line-height: 1.5;
+        }
+        
+        .error-details {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+            padding: 1.5rem;
+            border-radius: 12px;
+            margin-bottom: 2rem;
+            text-align: left;
+        }
+        
+        .error-details h3 {
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+        }
+        
+        .error-code {
+            font-family: monospace;
+            background: #fff;
+            padding: 0.5rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+        }
+        
+        .solutions {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+            padding: 1.5rem;
+            border-radius: 12px;
+            margin-bottom: 2rem;
+            text-align: left;
+        }
+        
+        .solutions h3 {
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+        }
+        
+        .solutions ul {
+            padding-left: 1.5rem;
+        }
+        
+        .solutions li {
+            margin-bottom: 0.5rem;
+        }
+        
+        .buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 0.75rem 2rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #c82333;
+            transform: translateY(-2px);
+        }
+        
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #545b62;
+            transform: translateY(-2px);
+        }
+        
+        .footer-note {
+            margin-top: 2rem;
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
+        
+        @media (max-width: 480px) {
+            .container {
+                padding: 2rem;
+                margin: 1rem;
+            }
+            
+            h1 {
+                font-size: 2rem;
+            }
+            
+            .buttons {
+                flex-direction: column;
+            }
+            
+            .btn {
+                width: 100%;
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="error-icon">❌</div>
+        <h1>Payment Failed</h1>
+        <p class="message">
+            Unfortunately, your payment could not be processed. No charges have been made to your account.
+        </p>
+        
+        <div class="error-details">
+            <h3>Error Details</h3>
+            <div class="error-code" id="errorCode">Error Code: Loading...</div>
+            <div id="errorMessage">Loading error details...</div>
+        </div>
+        
+        <div class="solutions">
+            <h3>What you can try:</h3>
+            <ul>
+                <li>Check your card details and try again</li>
+                <li>Ensure you have sufficient funds available</li>
+                <li>Try using a different payment method</li>
+                <li>Contact your bank if the issue persists</li>
+                <li>Contact our support team for assistance</li>
+            </ul>
+        </div>
+        
+        <div class="buttons">
+            <a href="/trolley.html" class="btn btn-danger">
+                🔄 Try Again
+            </a>
+            <a href="/" class="btn btn-secondary">
+                🏠 Return Home
+            </a>
+        </div>
+        
+        <p class="footer-note">
+            Your cart items are still saved. You can try the payment again or contact support for help.
+        </p>
+    </div>
+
+    <script>
+        // Extract URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const orderRef = urlParams.get('reference');
+        const errorCode = urlParams.get('error_code') || 'unknown';
+        const message = urlParams.get('message');
+        
+        // Update error information
+        document.getElementById('errorCode').textContent = 'Error Code: ' + errorCode.toUpperCase();
+        
+        // Error code explanations
+        const errorExplanations = {
+            'insufficient_funds': 'Your account does not have sufficient funds for this transaction.',
+            'card_declined': 'Your bank declined this transaction. Please contact your bank or try a different card.',
+            'expired_card': 'The card you used has expired. Please use a different card.',
+            'invalid_card': 'The card details entered are invalid. Please check and try again.',
+            'network_error': 'A network error occurred during processing. Please try again.',
+            'unknown': 'An unexpected error occurred during payment processing.'
+        };
+        
+        const explanation = errorExplanations[errorCode] || errorExplanations.unknown;
+        document.getElementById('errorMessage').textContent = explanation;
+        
+        // Update message if custom message provided
+        if (message) {
+            const messageElement = document.querySelector('.message');
+            messageElement.textContent = decodeURIComponent(message);
+        }
+        
+        // Log failure for debugging
+        console.log('Payment failed for order:', orderRef, 'Error:', errorCode);
+        
+        // Optional: Auto-refresh suggestion after some time
+        setTimeout(() => {
+            const footerNote = document.querySelector('.footer-note');
+            footerNote.innerHTML = 'Still having trouble? Try refreshing the page or contact support. <br><strong>Order Reference:</strong> ' + (orderRef || 'N/A');
+        }, 5000);
+    </script>
+</body>
+</html>
