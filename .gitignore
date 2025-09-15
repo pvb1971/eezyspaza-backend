@@ -1,3 +1,7 @@
   .idea/
   backend/serviceAccountKey.json
         .gradle/
+/app/google-services.json
+node_modules/
+.env
+*.hprof
