@@ -1,4 +1,4 @@
-// SERVER.JS VERSION: 2025-09-15-03:30:00 - FIXED Better error handling for the 404 case
+// SERVER.JS VERSION: 2025-09-15-07:30:00 - FIXED Yoco API endpoint URL
 // Enhanced Yoco Checkout API with comprehensive error handling, security, and debugging
 // Dependencies: express, node-fetch (or built-in fetch), crypto for webhook verification
 
@@ -18,9 +18,9 @@ app.use(cors());
 app.use(express.json());
 app.use(express.raw({ type: 'application/json', limit: '10kb' })); // For webhook endpoint
 
-// Configuration constants
+// Configuration constants - FIXED API URL
 const YOCO_CONFIG = {
-    API_BASE_URL: 'https://online.yoco.com/v1',
+    API_BASE_URL: 'https://payments.yoco.com/api',
     MIN_AMOUNT_CENTS: 500, // R5.00 minimum (adjust based on Yoco requirements)
     MAX_AMOUNT_CENTS: 10000000, // R100,000 maximum (adjust as needed)
     WEBHOOK_TIMEOUT_MS: 30000,
@@ -156,7 +156,24 @@ app.post('/create-checkout', async (req, res) => {
                 customer_name: req.body.metadata?.customer_name || 'Customer',
                 customer_email: req.body.metadata?.customer_email || '',
                 request_id: requestId,
-                timestamp: new Date().toISOString(),
+                timestamp: new Date().toISOString()
+    });
+});
+
+// Export configuration for use in other files
+module.exports = {
+    YOCO_CONFIG,
+    validateCheckoutInput,
+    makeYocoRequest
+};
+
+// Start the server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Yoco API endpoint: ${YOCO_CONFIG.API_BASE_URL}/checkouts`);
+    console.log(`API key configured: ${process.env.YOCO_SECRET_KEY ? 'Yes' : 'No'}`);
+});String(),
                 // Include limited item info if needed (keep under Yoco's metadata limits)
                 ...(req.body.items && req.body.items.length > 0 && {
                     item_count: req.body.items.length,
@@ -180,7 +197,11 @@ app.post('/create-checkout', async (req, res) => {
             try {
                 console.log(`[${requestId}] Yoco API attempt ${attempt}/${YOCO_CONFIG.RETRY_ATTEMPTS}`);
                 
-                yocoResponse = await makeYocoRequest(`${YOCO_CONFIG.API_BASE_URL}/checkouts/`, {
+                // FIXED: Use correct Yoco API endpoint
+                const yocoApiUrl = `${YOCO_CONFIG.API_BASE_URL}/checkouts`;
+                console.log(`[${requestId}] Making request to: ${yocoApiUrl}`);
+                
+                yocoResponse = await makeYocoRequest(yocoApiUrl, {
                     method: 'POST',
                     headers: {
                         'Authorization': `Bearer ${process.env.YOCO_SECRET_KEY}`,
@@ -256,7 +277,7 @@ app.post('/create-checkout', async (req, res) => {
                     message: 'The payment endpoint is not accessible. Please check API configuration.',
                     yoco_status: yocoResponse.status,
                     debug_info: process.env.NODE_ENV === 'development' ? {
-                        api_endpoint: 'https://online.yoco.com/v1/checkouts/',
+                        api_endpoint: `${YOCO_CONFIG.API_BASE_URL}/checkouts`,
                         api_key_prefix: keyPrefix,
                         api_key_valid_format: isValidFormat
                     } : undefined
@@ -722,20 +743,4 @@ app.use('/yoco*', (error, req, res, next) => {
     res.status(500).json({
         error: 'Payment service error',
         message: 'An unexpected error occurred in the payment service',
-        timestamp: new Date().toISOString()
-    });
-});
-
-// Export configuration for use in other files
-module.exports = {
-    YOCO_CONFIG,
-    validateCheckoutInput,
-    makeYocoRequest
-};
-
-// Start the server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-
-});
+        timestamp: new Date().toISO
