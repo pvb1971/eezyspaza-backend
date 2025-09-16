@@ -57,17 +57,17 @@ const YOCO_CONFIG = {
 async function storeOrder(orderData) {
     try {
         console.log(`[${orderData.request_id}] Storing order in Firebase:`, orderData.order_reference);
-        
+
         // Store in Firestore
         const docRef = await db.collection('orders').add({
             ...orderData,
             created_at: admin.firestore.FieldValue.serverTimestamp(),
             updated_at: admin.firestore.FieldValue.serverTimestamp()
         });
-        
+
         console.log(`[${orderData.request_id}] Order stored with ID: ${docRef.id}`);
         return docRef.id;
-        
+
     } catch (error) {
         console.error(`[${orderData.request_id}] Firebase storage error:`, error);
         throw error;
@@ -80,7 +80,7 @@ async function updateOrderStatus(checkoutId, status, additionalData = {}) {
         const snapshot = await ordersRef
             .where('yoco_checkout_id', '==', checkoutId)
             .get();
-        
+
         if (!snapshot.empty) {
             const orderDoc = snapshot.docs[0];
             const updateData = {
@@ -88,7 +88,7 @@ async function updateOrderStatus(checkoutId, status, additionalData = {}) {
                 updated_at: admin.firestore.FieldValue.serverTimestamp(),
                 ...additionalData
             };
-            
+
             if (status === 'completed') {
                 updateData.completed_at = admin.firestore.FieldValue.serverTimestamp();
             } else if (status === 'failed') {
@@ -96,7 +96,7 @@ async function updateOrderStatus(checkoutId, status, additionalData = {}) {
             } else if (status === 'cancelled') {
                 updateData.cancelled_at = admin.firestore.FieldValue.serverTimestamp();
             }
-            
+
             await orderDoc.ref.update(updateData);
             console.log(`Order ${orderDoc.id} updated to status: ${status}`);
             return orderDoc.id;
@@ -116,11 +116,11 @@ async function getOrderByReference(orderReference) {
         const snapshot = await ordersRef
             .where('order_reference', '==', orderReference)
             .get();
-        
+
         if (snapshot.empty) {
             return null;
         }
-        
+
         const orderDoc = snapshot.docs[0];
         return {
             id: orderDoc.id,
@@ -132,23 +132,67 @@ async function getOrderByReference(orderReference) {
     }
 }
 
+// NEW: Payment verification function
+async function verifyYocoPayment(checkoutId, paymentId) {
+    try {
+        const apiKey = process.env.YOCO_SECRET_KEY;
+
+        // First try to get checkout details
+        const checkoutResponse = await fetch(`https://payments.yoco.com/api/checkouts/${checkoutId}`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (checkoutResponse.ok) {
+            const checkoutData = await checkoutResponse.json();
+            console.log('Checkout verification:', checkoutData);
+            return checkoutData;
+        }
+
+        // If we have a paymentId, try to get payment details
+        if (paymentId) {
+            const paymentResponse = await fetch(`https://payments.yoco.com/api/payments/${paymentId}`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (paymentResponse.ok) {
+                const paymentData = await paymentResponse.json();
+                console.log('Payment verification:', paymentData);
+                return paymentData;
+            }
+        }
+
+        return null;
+    } catch (error) {
+        console.error('Error verifying payment:', error);
+        return null;
+    }
+}
+
 // Utility function to validate and sanitize input
 function validateCheckoutInput(body) {
     const errors = [];
     const requiredFields = ['amount', 'currency', 'successUrl', 'cancelUrl'];
-    
+
     // Check required fields
     const missingFields = requiredFields.filter(field => !body[field]);
     if (missingFields.length > 0) {
         errors.push(`Missing required fields: ${missingFields.join(', ')}`);
     }
-    
+
     // Validate amount
     const amountFloat = parseFloat(body.amount);
     if (isNaN(amountFloat) || amountFloat <= 0) {
         errors.push('Amount must be a positive number');
     }
-    
+
     // Validate URLs (basic check)
     const urlFields = ['successUrl', 'cancelUrl', 'failureUrl'].filter(field => body[field]);
     urlFields.forEach(field => {
@@ -158,12 +202,12 @@ function validateCheckoutInput(body) {
             errors.push(`Invalid URL format for ${field}: ${body[field]}`);
         }
     });
-    
+
     // Validate currency
     if (body.currency && !/^[A-Z]{3}$/.test(body.currency)) {
         errors.push('Currency must be a 3-letter ISO code (e.g., ZAR)');
     }
-    
+
     return {
         isValid: errors.length === 0,
         errors,
@@ -175,7 +219,7 @@ function validateCheckoutInput(body) {
 async function makeYocoRequest(url, options = {}) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), YOCO_CONFIG.API_TIMEOUT_MS);
-    
+
     try {
         const response = await fetch(url, {
             ...options,
@@ -195,11 +239,11 @@ async function makeYocoRequest(url, options = {}) {
 // Enhanced /create-checkout endpoint with Firebase integration
 app.post('/create-checkout', async (req, res) => {
     const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
+
     try {
         console.log(`[${requestId}] === CHECKOUT REQUEST DEBUG ===`);
         console.log(`[${requestId}] Received from frontend:`, JSON.stringify(req.body, null, 2));
-        
+
         // Input validation
         const validation = validateCheckoutInput(req.body);
         if (!validation.isValid) {
@@ -210,11 +254,13 @@ app.post('/create-checkout', async (req, res) => {
                 received_fields: Object.keys(req.body)
             });
         }
-        
+       // UPDATED: Now update the success URLs with checkoutId
+        yocoPayload.successUrl = `${req.body.successUrl || 'https://eezyspaza-backend1.onrender.com/yoco-payment-success'}?checkoutId=${yocoData.id}`;
+
         // Convert amount to cents for Yoco
         const amountInCents = Math.round(validation.amountFloat * 100);
         console.log(`[${requestId}] Amount conversion:`, req.body.amount, '→', amountInCents, 'cents');
-        
+
         // Validate amount range
         if (amountInCents < YOCO_CONFIG.MIN_AMOUNT_CENTS) {
             console.error(`[${requestId}] Amount below minimum:`, amountInCents, 'cents');
@@ -225,7 +271,7 @@ app.post('/create-checkout', async (req, res) => {
                 currency: req.body.currency || 'ZAR'
             });
         }
-        
+
         if (amountInCents > YOCO_CONFIG.MAX_AMOUNT_CENTS) {
             console.error(`[${requestId}] Amount above maximum:`, amountInCents, 'cents');
             return res.status(400).json({
@@ -235,7 +281,7 @@ app.post('/create-checkout', async (req, res) => {
                 currency: req.body.currency || 'ZAR'
             });
         }
-        
+
         // Validate environment configuration
         if (!process.env.YOCO_SECRET_KEY) {
             console.error(`[${requestId}] YOCO_SECRET_KEY environment variable is not set`);
@@ -244,17 +290,16 @@ app.post('/create-checkout', async (req, res) => {
                 message: 'Payment service not properly configured'
             });
         }
-        
+
         // Generate order reference
-        const orderReference = req.body.metadata?.order_reference || 
+        const orderReference = req.body.metadata?.order_reference ||
             `ORDER_${Date.now()}_${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
-        
-        // Prepare Yoco payload
+
+        // Prepare Yoco payload - UPDATED to include checkoutId in success URLs
         const yocoPayload = {
             amount: amountInCents,
             currency: req.body.currency || 'ZAR',
             cancelUrl: req.body.cancelUrl || 'https://eezyspaza-backend1.onrender.com/yoco-payment-cancel',
-            successUrl: req.body.successUrl || 'https://eezyspaza-backend1.onrender.com/yoco-payment-success',
             failureUrl: req.body.failureUrl || 'https://eezyspaza-backend1.onrender.com/yoco-payment-failure',
             metadata: {
                 order_reference: orderReference,
@@ -266,25 +311,25 @@ app.post('/create-checkout', async (req, res) => {
                 first_item: req.body.items?.[0]?.name?.substring(0, 50) || 'Item'
             }
         };
-        
+
         console.log(`[${requestId}] Sending to Yoco:`, JSON.stringify(yocoPayload, null, 2));
-        
+
         // Log API key format for debugging (without exposing the key)
         const keyPrefix = process.env.YOCO_SECRET_KEY.substring(0, 12);
         const isTestKey = process.env.YOCO_SECRET_KEY.startsWith('sk_test_');
         console.log(`[${requestId}] Using ${isTestKey ? 'TEST' : 'LIVE'} Yoco API key starting with:`, keyPrefix);
-        
+
         // Make request to Yoco with retry logic
         let yocoResponse;
         let lastError;
-        
+
         for (let attempt = 1; attempt <= YOCO_CONFIG.RETRY_ATTEMPTS; attempt++) {
             try {
                 console.log(`[${requestId}] Yoco API attempt ${attempt}/${YOCO_CONFIG.RETRY_ATTEMPTS}`);
-                
+
                 const yocoApiUrl = `${YOCO_CONFIG.API_BASE_URL}/checkouts`;
                 console.log(`[${requestId}] Making request to: ${yocoApiUrl}`);
-                
+
                 yocoResponse = await makeYocoRequest(yocoApiUrl, {
                     method: 'POST',
                     headers: {
@@ -295,13 +340,13 @@ app.post('/create-checkout', async (req, res) => {
                     },
                     body: JSON.stringify(yocoPayload)
                 });
-                
+
                 break; // Success, exit retry loop
-                
+
             } catch (error) {
                 lastError = error;
                 console.warn(`[${requestId}] Attempt ${attempt} failed:`, error.message);
-                
+
                 if (attempt < YOCO_CONFIG.RETRY_ATTEMPTS) {
                     const delay = Math.pow(2, attempt - 1) * 1000;
                     console.log(`[${requestId}] Retrying in ${delay}ms...`);
@@ -309,7 +354,7 @@ app.post('/create-checkout', async (req, res) => {
                 }
             }
         }
-        
+
         if (!yocoResponse) {
             console.error(`[${requestId}] All Yoco API attempts failed:`, lastError?.message);
             return res.status(503).json({
@@ -319,15 +364,15 @@ app.post('/create-checkout', async (req, res) => {
                 request_id: requestId
             });
         }
-        
+
         console.log(`[${requestId}] Yoco response status:`, yocoResponse.status);
         console.log(`[${requestId}] Yoco response headers:`, Object.fromEntries(yocoResponse.headers.entries()));
-        
+
         // Handle non-successful responses
         if (!yocoResponse.ok) {
             let errorDetails;
             const contentType = yocoResponse.headers.get('content-type');
-            
+
             if (contentType && contentType.includes('application/json')) {
                 try {
                     errorDetails = await yocoResponse.json();
@@ -341,12 +386,12 @@ app.post('/create-checkout', async (req, res) => {
                 console.error(`[${requestId}] Yoco Text Error:`, errorText);
                 errorDetails = { message: errorText || 'Unknown error' };
             }
-            
+
             // Enhanced error handling for different status codes
             const keyPrefix = process.env.YOCO_SECRET_KEY?.substring(0, 8) || 'MISSING';
-            const isValidFormat = process.env.YOCO_SECRET_KEY?.startsWith('sk_test_') || 
+            const isValidFormat = process.env.YOCO_SECRET_KEY?.startsWith('sk_test_') ||
                                  process.env.YOCO_SECRET_KEY?.startsWith('sk_live_');
-            
+
             let userMessage = 'Payment processing failed';
             if (yocoResponse.status === 400) {
                 userMessage = 'Invalid payment information provided';
@@ -359,7 +404,7 @@ app.post('/create-checkout', async (req, res) => {
             } else if (yocoResponse.status >= 500) {
                 userMessage = 'Payment service temporarily unavailable';
             }
-            
+
             return res.status(yocoResponse.status >= 500 ? 503 : 400).json({
                 error: userMessage,
                 yoco_status: yocoResponse.status,
@@ -375,7 +420,7 @@ app.post('/create-checkout', async (req, res) => {
                 } : undefined
             });
         }
-        
+
         // Parse successful response
         let yocoData;
         try {
@@ -389,7 +434,10 @@ app.post('/create-checkout', async (req, res) => {
                 request_id: requestId
             });
         }
-        
+
+        // UPDATED: Now update the success URLs with checkoutId
+        yocoPayload.successUrl = `${req.body.successUrl || 'https://eezyspaza-backend1.onrender.com/yoco-payment-success'}?checkoutId=${yocoData.id}`;
+
         // Validate redirect URL
         const redirectUrl = yocoData.redirectUrl || yocoData.redirect_url;
         if (!redirectUrl) {
@@ -401,7 +449,7 @@ app.post('/create-checkout', async (req, res) => {
                 yoco_response: process.env.NODE_ENV === 'development' ? yocoData : undefined
             });
         }
-        
+
         // Store order information in Firebase
         try {
             const orderData = {
@@ -420,19 +468,19 @@ app.post('/create-checkout', async (req, res) => {
                     failure: req.body.failureUrl
                 }
             };
-            
+
             console.log(`[${requestId}] Order data prepared for storage:`, orderData);
             await storeOrder(orderData); // Store in Firebase
-            
+
         } catch (dbError) {
             console.error(`[${requestId}] Database storage error (non-critical):`, dbError);
             // Continue even if database storage fails
         }
-        
+
         // Return redirect URL
         console.log(`[${requestId}] Checkout successful, redirect URL:`, redirectUrl);
-        
-        res.json({ 
+
+        res.json({
             redirectUrl: redirectUrl,
             order_reference: orderReference,
             amount_cents: amountInCents,
@@ -441,17 +489,17 @@ app.post('/create-checkout', async (req, res) => {
             checkout_id: yocoData.id,
             request_id: requestId
         });
-        
+
     } catch (networkError) {
         console.error(`[${requestId}] Network/Server error in checkout:`, networkError);
-        
+
         let errorResponse = {
             error: 'Payment processing error',
             message: 'An unexpected error occurred',
             request_id: requestId,
             retry_recommended: true
         };
-        
+
         if (networkError.message === 'Request timed out') {
             errorResponse = {
                 error: 'Payment service timeout',
@@ -461,7 +509,7 @@ app.post('/create-checkout', async (req, res) => {
             };
             return res.status(504).json(errorResponse);
         }
-        
+
         if (networkError.code === 'ENOTFOUND' || networkError.code === 'ECONNREFUSED') {
             errorResponse = {
                 error: 'Payment service unavailable',
@@ -471,7 +519,7 @@ app.post('/create-checkout', async (req, res) => {
             };
             return res.status(503).json(errorResponse);
         }
-        
+
         if (process.env.NODE_ENV === 'development') {
             errorResponse.debug_info = {
                 error_name: networkError.name,
@@ -479,8 +527,44 @@ app.post('/create-checkout', async (req, res) => {
                 error_message: networkError.message
             };
         }
-        
+
         res.status(500).json(errorResponse);
+    }
+});
+
+// NEW: /success route for handling success redirects with payment verification
+app.get('/success', async (req, res) => {
+    const requestId = `success_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    console.log(`[${requestId}] === PAYMENT SUCCESS PAGE ===`);
+    console.log(`[${requestId}] Query params:`, req.query);
+
+    try {
+        const { checkoutId, paymentId, status } = req.query;
+
+        if (!checkoutId) {
+            console.log(`[${requestId}] No checkoutId found in query params`);
+            return res.status(400).send('Missing checkout information');
+        }
+
+        console.log(`[${requestId}] Processing payment for checkout: ${checkoutId}`);
+
+        // Verify the payment with Yoco API
+        const paymentDetails = await verifyYocoPayment(checkoutId, paymentId);
+
+        if (paymentDetails && (paymentDetails.status === 'successful' || paymentDetails.status === 'created')) {
+            // Update your database with successful payment
+            await updateOrderStatus(checkoutId, 'completed', paymentDetails);
+
+            // Redirect to your frontend success page with order details
+            res.redirect(`${process.env.FRONTEND_URL}/payment-success?order=${paymentDetails.metadata?.order_reference}`);
+        } else {
+            console.log(`[${requestId}] Payment verification failed:`, paymentDetails);
+            res.redirect(`${process.env.FRONTEND_URL}/payment-failed`);
+        }
+
+    } catch (error) {
+        console.error(`[${requestId}] Error processing success:`, error);
+        res.status(500).send('Error processing payment confirmation');
     }
 });
 
@@ -492,7 +576,7 @@ app.get('/yoco-health', async (req, res) => {
             timestamp: new Date().toISOString(),
             checks: {}
         };
-        
+
         // Check API key configuration
         if (!process.env.YOCO_SECRET_KEY) {
             healthData.status = 'error';
@@ -501,17 +585,17 @@ app.get('/yoco-health', async (req, res) => {
                 message: 'API key not configured'
             };
         } else {
-            const keyFormat = process.env.YOCO_SECRET_KEY.startsWith('sk_test_') || 
+            const keyFormat = process.env.YOCO_SECRET_KEY.startsWith('sk_test_') ||
                              process.env.YOCO_SECRET_KEY.startsWith('sk_live_');
             const environment = process.env.YOCO_SECRET_KEY.startsWith('sk_test_') ? 'sandbox' : 'live';
-            
+
             healthData.checks.api_key = {
                 status: keyFormat ? 'ok' : 'warning',
                 message: keyFormat ? 'API key format is valid' : 'API key format may be incorrect',
                 environment: environment
             };
         }
-        
+
         // Check Firebase connectivity
         try {
             await db.collection('health_check').limit(1).get();
@@ -525,7 +609,7 @@ app.get('/yoco-health', async (req, res) => {
                 message: `Firebase connection failed: ${firebaseError.message}`
             };
         }
-        
+
         // Test connectivity to Yoco API (optional ping endpoint)
         try {
             const testResponse = await makeYocoRequest(`${YOCO_CONFIG.API_BASE_URL}/ping`, {
@@ -535,20 +619,20 @@ app.get('/yoco-health', async (req, res) => {
                     'User-Agent': 'EezySpaza/1.0 (health-check)'
                 }
             });
-            
+
             healthData.checks.connectivity = {
                 status: testResponse.ok ? 'ok' : 'warning',
                 message: `API responded with status ${testResponse.status}`,
                 response_time: Date.now()
             };
-            
+
         } catch (connectError) {
             healthData.checks.connectivity = {
                 status: 'error',
                 message: `Failed to connect: ${connectError.message}`
             };
         }
-        
+
         // Determine overall status
         const statuses = Object.values(healthData.checks).map(check => check.status);
         if (statuses.includes('error')) {
@@ -558,13 +642,13 @@ app.get('/yoco-health', async (req, res) => {
         } else {
             healthData.status = 'ok';
         }
-        
+
         const httpStatus = healthData.status === 'error' ? 503 : 200;
         res.status(httpStatus).json(healthData);
-        
+
     } catch (error) {
-        res.status(500).json({ 
-            status: 'error', 
+        res.status(500).json({
+            status: 'error',
             message: error.message,
             timestamp: new Date().toISOString()
         });
@@ -574,11 +658,11 @@ app.get('/yoco-health', async (req, res) => {
 // Webhook endpoint for Yoco payment notifications with Firebase integration
 app.post('/yoco-webhook', express.raw({type: 'application/json'}), async (req, res) => {
     const webhookId = `webhook_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-    
+
     try {
         console.log(`[${webhookId}] === YOCO WEBHOOK RECEIVED ===`);
         console.log(`[${webhookId}] Headers:`, req.headers);
-        
+
         // Verify webhook signature if secret is configured
         const signature = req.headers['x-yoco-signature'];
         if (process.env.YOCO_WEBHOOK_SECRET && signature) {
@@ -586,7 +670,7 @@ app.post('/yoco-webhook', express.raw({type: 'application/json'}), async (req, r
                 .createHmac('sha256', process.env.YOCO_WEBHOOK_SECRET)
                 .update(req.body)
                 .digest('hex');
-            
+
             if (signature !== expectedSignature) {
                 console.error(`[${webhookId}] Invalid webhook signature`);
                 return res.status(401).json({ error: 'Invalid signature' });
@@ -594,30 +678,30 @@ app.post('/yoco-webhook', express.raw({type: 'application/json'}), async (req, r
         } else {
             console.warn(`[${webhookId}] No webhook signature provided or secret not set`);
         }
-        
+
         const event = JSON.parse(req.body.toString());
         console.log(`[${webhookId}] Event:`, event);
-        
+
         // Handle different event types
         switch (event.type) {
             case 'payment.succeeded':
                 await handlePaymentSuccess(event.data, webhookId);
                 break;
-                
+
             case 'payment.failed':
                 await handlePaymentFailure(event.data, webhookId);
                 break;
-                
+
             case 'payment.cancelled':
                 await handlePaymentCancellation(event.data, webhookId);
                 break;
-                
+
             default:
                 console.log(`[${webhookId}] Unhandled event type: ${event.type}`);
         }
-        
+
         res.status(200).json({ received: true, webhook_id: webhookId });
-        
+
     } catch (error) {
         console.error(`[${webhookId}] Webhook processing error:`, error);
         res.status(500).json({ error: 'Webhook processing failed', webhook_id: webhookId });
@@ -627,7 +711,7 @@ app.post('/yoco-webhook', express.raw({type: 'application/json'}), async (req, r
 // Firebase-integrated webhook event handlers
 async function handlePaymentSuccess(paymentData, webhookId) {
     console.log(`[${webhookId}] Processing successful payment:`, paymentData);
-    
+
     try {
         // Update order status in Firebase
         const checkoutId = paymentData.checkoutId || paymentData.id;
@@ -636,10 +720,10 @@ async function handlePaymentSuccess(paymentData, webhookId) {
             payment_method: paymentData.paymentMethod || 'card',
             transaction_id: paymentData.id || paymentData.transactionId
         });
-        
+
         if (orderId) {
             console.log(`[${webhookId}] Order ${orderId} marked as completed`);
-            
+
             // TODO: Additional success actions:
             // - Clear user's cart
             // - Send confirmation email
@@ -648,7 +732,7 @@ async function handlePaymentSuccess(paymentData, webhookId) {
         } else {
             console.warn(`[${webhookId}] No order found for checkout ID: ${checkoutId}`);
         }
-        
+
         console.log(`[${webhookId}] Payment success processing completed`);
     } catch (error) {
         console.error(`[${webhookId}] Error processing successful payment:`, error);
@@ -658,7 +742,7 @@ async function handlePaymentSuccess(paymentData, webhookId) {
 
 async function handlePaymentFailure(paymentData, webhookId) {
     console.log(`[${webhookId}] Processing failed payment:`, paymentData);
-    
+
     try {
         // Update order status in Firebase
         const checkoutId = paymentData.checkoutId || paymentData.id;
@@ -667,16 +751,16 @@ async function handlePaymentFailure(paymentData, webhookId) {
             payment_data: paymentData,
             error_code: paymentData.errorCode || 'unknown'
         });
-        
+
         if (orderId) {
             console.log(`[${webhookId}] Order ${orderId} marked as failed`);
-            
+
             // TODO: Additional failure actions:
             // - Send failure notification
             // - Log for analytics
             // - Restore cart items
         }
-        
+
         console.log(`[${webhookId}] Payment failure processing completed`);
     } catch (error) {
         console.error(`[${webhookId}] Error processing failed payment:`, error);
@@ -686,7 +770,7 @@ async function handlePaymentFailure(paymentData, webhookId) {
 
 async function handlePaymentCancellation(paymentData, webhookId) {
     console.log(`[${webhookId}] Processing cancelled payment:`, paymentData);
-    
+
     try {
         // Update order status in Firebase
         const checkoutId = paymentData.checkoutId || paymentData.id;
@@ -694,15 +778,15 @@ async function handlePaymentCancellation(paymentData, webhookId) {
             payment_data: paymentData,
             cancellation_reason: 'User cancelled payment'
         });
-        
+
         if (orderId) {
             console.log(`[${webhookId}] Order ${orderId} marked as cancelled`);
-            
+
             // TODO: Additional cancellation actions:
             // - Restore cart items
             // - Send cancellation notification
         }
-        
+
         console.log(`[${webhookId}] Payment cancellation processing completed`);
     } catch (error) {
         console.error(`[${webhookId}] Error processing cancelled payment:`, error);
@@ -710,19 +794,44 @@ async function handlePaymentCancellation(paymentData, webhookId) {
     }
 }
 
-// Payment result handlers with Firebase integration
+// UPDATED: Payment result handlers with Firebase integration and payment verification
 app.get('/yoco-payment-success', async (req, res) => {
     const sessionId = `success_${Date.now()}`;
     console.log(`[${sessionId}] === PAYMENT SUCCESS PAGE ===`);
     console.log(`[${sessionId}] Query params:`, req.query);
-    
+
     try {
+        // Extract payment information from query parameters
+        const { checkoutId, paymentId, status } = req.query;
+
+        if (checkoutId) {
+            console.log(`[${sessionId}] Processing payment for checkout: ${checkoutId}`);
+
+            // Verify the payment with Yoco API
+            const paymentDetails = await verifyYocoPayment(checkoutId, paymentId);
+
+            if (paymentDetails && (paymentDetails.status === 'successful' || paymentDetails.status === 'created')) {
+                // Update order status in Firebase
+                await updateOrderStatus(checkoutId, 'completed', paymentDetails);
+
+                const successParams = new URLSearchParams({
+                    status: 'success',
+                    reference: paymentDetails.metadata?.order_reference || 'unknown',
+                    amount: paymentDetails.amount / 100,
+                    timestamp: new Date().toISOString()
+                });
+
+                res.redirect(`${process.env.FRONTEND_URL}/payment-success.html?${successParams}`);
+                return;
+            }
+        }
+
+        // Fallback to existing logic if verification fails
         const orderReference = req.query.order_reference || req.query.reference;
-        
+
         if (orderReference) {
             console.log(`[${sessionId}] Order reference: ${orderReference}`);
-            
-            // Try to get order details from Firebase
+
             try {
                 const order = await getOrderByReference(orderReference);
                 if (order) {
@@ -732,18 +841,18 @@ app.get('/yoco-payment-success', async (req, res) => {
                 console.warn(`[${sessionId}] Could not fetch order details:`, dbError.message);
             }
         }
-        
+
         const successParams = new URLSearchParams({
             status: 'success',
             reference: orderReference || 'unknown',
             timestamp: new Date().toISOString()
         });
-        
-        res.redirect(`/payment-success.html?${successParams}`);
-        
+
+        res.redirect(`${process.env.FRONTEND_URL}/payment-success.html?${successParams}`);
+
     } catch (error) {
         console.error(`[${sessionId}] Error handling success redirect:`, error);
-        res.redirect('/payment-success.html?status=success&error=processing');
+        res.redirect(`${process.env.FRONTEND_URL}/payment-success.html?status=success&error=processing`);
     }
 });
 
@@ -751,13 +860,13 @@ app.get('/yoco-payment-cancel', async (req, res) => {
     const sessionId = `cancel_${Date.now()}`;
     console.log(`[${sessionId}] === PAYMENT CANCELLED ===`);
     console.log(`[${sessionId}] Query params:`, req.query);
-    
+
     try {
         const orderReference = req.query.order_reference || req.query.reference;
-        
+
         if (orderReference) {
             console.log(`[${sessionId}] Order cancelled: ${orderReference}`);
-            
+
             // Try to update order status in Firebase
             try {
                 const order = await getOrderByReference(orderReference);
@@ -770,19 +879,19 @@ app.get('/yoco-payment-cancel', async (req, res) => {
                 console.warn(`[${sessionId}] Could not update order status:`, dbError.message);
             }
         }
-        
+
         const cancelParams = new URLSearchParams({
             status: 'cancelled',
             reference: orderReference || 'unknown',
             message: 'Payment was cancelled. Your cart items are still saved.',
             timestamp: new Date().toISOString()
         });
-        
-        res.redirect(`/payment-cancelled.html?${cancelParams}`);
-        
+
+        res.redirect(`${process.env.FRONTEND_URL}/payment-cancelled.html?${cancelParams}`);
+
     } catch (error) {
         console.error(`[${sessionId}] Error handling cancel redirect:`, error);
-        res.redirect('/payment-cancelled.html?status=cancelled&error=processing');
+        res.redirect(`${process.env.FRONTEND_URL}/payment-cancelled.html?status=cancelled&error=processing`);
     }
 });
 
@@ -790,14 +899,14 @@ app.get('/yoco-payment-failure', async (req, res) => {
     const sessionId = `failure_${Date.now()}`;
     console.log(`[${sessionId}] === PAYMENT FAILED ===`);
     console.log(`[${sessionId}] Query params:`, req.query);
-    
+
     try {
         const orderReference = req.query.order_reference || req.query.reference;
         const errorCode = req.query.error_code || 'unknown';
-        
+
         if (orderReference) {
             console.log(`[${sessionId}] Order failed: ${orderReference}, Error: ${errorCode}`);
-            
+
             // Try to update order status in Firebase
             try {
                 const order = await getOrderByReference(orderReference);
@@ -811,7 +920,7 @@ app.get('/yoco-payment-failure', async (req, res) => {
                 console.warn(`[${sessionId}] Could not update order status:`, dbError.message);
             }
         }
-        
+
         const errorMessages = {
             'insufficient_funds': 'Payment failed due to insufficient funds.',
             'card_declined': 'Your card was declined. Please try a different payment method.',
@@ -820,7 +929,7 @@ app.get('/yoco-payment-failure', async (req, res) => {
             'network_error': 'Network error occurred. Please try again.',
             'unknown': 'Payment failed. Please try again or contact support.'
         };
-        
+
         const failureParams = new URLSearchParams({
             status: 'failed',
             reference: orderReference || 'unknown',
@@ -828,12 +937,12 @@ app.get('/yoco-payment-failure', async (req, res) => {
             message: errorMessages[errorCode] || errorMessages.unknown,
             timestamp: new Date().toISOString()
         });
-        
-        res.redirect(`/payment-failed.html?${failureParams}`);
-        
+
+        res.redirect(`${process.env.FRONTEND_URL}/payment-failed.html?${failureParams}`);
+
     } catch (error) {
         console.error(`[${sessionId}] Error handling failure redirect:`, error);
-        res.redirect('/payment-failed.html?status=failed&error=processing');
+        res.redirect(`${process.env.FRONTEND_URL}/payment-failed.html?status=failed&error=processing`);
     }
 });
 
@@ -841,21 +950,21 @@ app.get('/yoco-payment-failure', async (req, res) => {
 app.get('/order-status/:reference', async (req, res) => {
     try {
         const orderReference = req.params.reference;
-        
+
         if (!orderReference) {
             return res.status(400).json({ error: 'Order reference required' });
         }
-        
+
         // Query Firebase for order
         const order = await getOrderByReference(orderReference);
-        
+
         if (!order) {
-            return res.status(404).json({ 
+            return res.status(404).json({
                 error: 'Order not found',
-                order_reference: orderReference 
+                order_reference: orderReference
             });
         }
-        
+
         res.json({
             order_reference: orderReference,
             status: order.status,
@@ -866,7 +975,7 @@ app.get('/order-status/:reference', async (req, res) => {
             items: order.items || [],
             customer_info: order.customer_info || {}
         });
-        
+
     } catch (error) {
         console.error('Error fetching order status:', error);
         res.status(500).json({ error: 'Failed to fetch order status' });
@@ -877,18 +986,18 @@ app.get('/order-status/:reference', async (req, res) => {
 app.get('/orders/customer/:email', async (req, res) => {
     try {
         const customerEmail = req.params.email;
-        
+
         if (!customerEmail) {
             return res.status(400).json({ error: 'Customer email required' });
         }
-        
+
         const ordersRef = db.collection('orders');
         const snapshot = await ordersRef
             .where('customer_info.customer_email', '==', customerEmail)
             .orderBy('created_at', 'desc')
             .limit(50)
             .get();
-        
+
         const orders = [];
         snapshot.forEach(doc => {
             orders.push({
@@ -896,13 +1005,13 @@ app.get('/orders/customer/:email', async (req, res) => {
                 ...doc.data()
             });
         });
-        
+
         res.json({
             customer_email: customerEmail,
             total_orders: orders.length,
             orders: orders
         });
-        
+
     } catch (error) {
         console.error('Error fetching customer orders:', error);
         res.status(500).json({ error: 'Failed to fetch customer orders' });
@@ -915,15 +1024,15 @@ app.get('/admin/orders', async (req, res) => {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 20;
         const status = req.query.status;
-        
+
         let query = db.collection('orders').orderBy('created_at', 'desc');
-        
+
         if (status) {
             query = query.where('status', '==', status);
         }
-        
+
         const snapshot = await query.limit(limit).get();
-        
+
         const orders = [];
         snapshot.forEach(doc => {
             orders.push({
@@ -931,7 +1040,7 @@ app.get('/admin/orders', async (req, res) => {
                 ...doc.data()
             });
         });
-        
+
         res.json({
             page: page,
             limit: limit,
@@ -939,7 +1048,7 @@ app.get('/admin/orders', async (req, res) => {
             status_filter: status || 'all',
             orders: orders
         });
-        
+
     } catch (error) {
         console.error('Error fetching admin orders:', error);
         res.status(500).json({ error: 'Failed to fetch orders' });
@@ -974,7 +1083,8 @@ module.exports = {
     makeYocoRequest,
     storeOrder,
     updateOrderStatus,
-    getOrderByReference
+    getOrderByReference,
+    verifyYocoPayment
 };
 
 // Start the server
@@ -985,17 +1095,17 @@ app.listen(PORT, () => {
     console.log(`🔑 API key configured: ${process.env.YOCO_SECRET_KEY ? 'Yes' : 'No'}`);
     console.log(`🔥 Firebase configured: ${process.env.FIREBASE_PROJECT_ID ? 'Yes' : 'No'}`);
     console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-    
+
     // Environment validation warnings
     if (!process.env.YOCO_SECRET_KEY) {
         console.warn('⚠️  YOCO_SECRET_KEY not found in environment variables!');
         console.warn('⚠️  Set YOCO_SECRET_KEY in your .env file');
     }
-    
+
     if (!process.env.FIREBASE_PROJECT_ID) {
         console.warn('⚠️  Firebase configuration incomplete!');
         console.warn('⚠️  Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY in your .env file');
     }
-    
+
     console.log('✅ Server ready for payments and Firebase operations!');
 });
