@@ -294,9 +294,7 @@ app.post('/create-checkout', async (req, res) => {
         const orderReference = req.body.metadata?.order_reference ||
             `ORDER_${Date.now()}_${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
 
-       // UPDATED: Now update the success URLs with checkoutId
-        yocoPayload.successUrl = `${req.body.successUrl || 'https://eezyspaza-backend1.onrender.com/yoco-payment-success'}?checkoutId=${yocoData.id}`;
-
+       
         // Prepare Yoco payload - UPDATED to include checkoutId in success URLs
         const yocoPayload = {
             amount: amountInCents,
