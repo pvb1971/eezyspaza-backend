@@ -1,4 +1,5 @@
-// SERVER.JS VERSION: 2025-09-16-FIREBASE-INTEGRATED - Complete Yoco + Firebase Integration
+// SERVER.JS VERSION: 2025-09-17- Fix: Multiple fallback methods verify when checkout ID isn't passed in the URL.
+// FIREBASE-INTEGRATED - Complete Yoco + Firebase Integration
 // Enhanced Yoco Checkout API with Firebase database, comprehensive error handling, security, and debugging
 
 const express = require('express');
@@ -254,8 +255,6 @@ app.post('/create-checkout', async (req, res) => {
                 received_fields: Object.keys(req.body)
             });
         }
-       // UPDATED: Now update the success URLs with checkoutId
-        yocoPayload.successUrl = `${req.body.successUrl || 'https://eezyspaza-backend1.onrender.com/yoco-payment-success'}?checkoutId=${yocoData.id}`;
 
         // Convert amount to cents for Yoco
         const amountInCents = Math.round(validation.amountFloat * 100);
@@ -294,6 +293,9 @@ app.post('/create-checkout', async (req, res) => {
         // Generate order reference
         const orderReference = req.body.metadata?.order_reference ||
             `ORDER_${Date.now()}_${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+
+       // UPDATED: Now update the success URLs with checkoutId
+        yocoPayload.successUrl = `${req.body.successUrl || 'https://eezyspaza-backend1.onrender.com/yoco-payment-success'}?checkoutId=${yocoData.id}`;
 
         // Prepare Yoco payload - UPDATED to include checkoutId in success URLs
         const yocoPayload = {
@@ -537,31 +539,60 @@ app.get('/success', async (req, res) => {
     const requestId = `success_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     console.log(`[${requestId}] === PAYMENT SUCCESS PAGE ===`);
     console.log(`[${requestId}] Query params:`, req.query);
-
+    
     try {
         const { checkoutId, paymentId, status } = req.query;
-
-        if (!checkoutId) {
-            console.log(`[${requestId}] No checkoutId found in query params`);
-            return res.status(400).send('Missing checkout information');
+        
+        if (checkoutId) {
+            console.log(`[${requestId}] Processing payment for checkout: ${checkoutId}`);
+            
+            // Verify the payment with Yoco API
+            const paymentDetails = await verifyYocoPayment(checkoutId, paymentId);
+            
+            if (paymentDetails && (paymentDetails.status === 'successful' || paymentDetails.status === 'created')) {
+                // Update your database with successful payment
+                await updateOrderStatus(checkoutId, 'completed', paymentDetails);
+                
+                // Redirect to your frontend success page with order details
+                res.redirect(`${process.env.FRONTEND_URL}/payment-success?order=${paymentDetails.metadata?.order_reference}`);
+                return;
+            } else {
+                console.log(`[${requestId}] Payment verification failed:`, paymentDetails);
+                res.redirect(`${process.env.FRONTEND_URL}/payment-failed`);
+                return;
+            }
         }
-
-        console.log(`[${requestId}] Processing payment for checkout: ${checkoutId}`);
-
-        // Verify the payment with Yoco API
-        const paymentDetails = await verifyYocoPayment(checkoutId, paymentId);
-
-        if (paymentDetails && (paymentDetails.status === 'successful' || paymentDetails.status === 'created')) {
-            // Update your database with successful payment
-            await updateOrderStatus(checkoutId, 'completed', paymentDetails);
-
-            // Redirect to your frontend success page with order details
-            res.redirect(`${process.env.FRONTEND_URL}/payment-success?order=${paymentDetails.metadata?.order_reference}`);
-        } else {
-            console.log(`[${requestId}] Payment verification failed:`, paymentDetails);
-            res.redirect(`${process.env.FRONTEND_URL}/payment-failed`);
+        
+        // Try to verify payment using order reference if no checkoutId
+        const orderReference = req.query.order_reference || req.query.reference;
+        
+        if (orderReference) {
+            console.log(`[${requestId}] Attempting verification with order reference: ${orderReference}`);
+            
+            try {
+                const order = await getOrderByReference(orderReference);
+                if (order && order.yoco_checkout_id) {
+                    console.log(`[${requestId}] Found order with checkout ID: ${order.yoco_checkout_id}`);
+                    
+                    const paymentDetails = await verifyYocoPayment(order.yoco_checkout_id);
+                    if (paymentDetails && (paymentDetails.status === 'successful' || paymentDetails.status === 'created')) {
+                        await updateOrderStatus(order.yoco_checkout_id, 'completed', paymentDetails);
+                        
+                        res.redirect(`${process.env.FRONTEND_URL}/payment-success?order=${orderReference}`);
+                        return;
+                    }
+                } else {
+                    console.log(`[${requestId}] Order found but no checkout ID available`);
+                }
+            } catch (dbError) {
+                console.warn(`[${requestId}] Could not fetch order details:`, dbError.message);
+            }
         }
-
+        
+        // If no verification method worked
+        console.log(`[${requestId}] No checkoutId or order reference found in query params`);
+        res.status(400).send('Missing payment information for verification');
+        
     } catch (error) {
         console.error(`[${requestId}] Error processing success:`, error);
         res.status(500).send('Error processing payment confirmation');
@@ -826,21 +857,38 @@ app.get('/yoco-payment-success', async (req, res) => {
             }
         }
 
-        // Fallback to existing logic if verification fails
-        const orderReference = req.query.order_reference || req.query.reference;
+        // Try to verify payment using order reference if no checkoutId
+const orderReference = req.query.order_reference || req.query.reference;
 
-        if (orderReference) {
-            console.log(`[${sessionId}] Order reference: ${orderReference}`);
-
-            try {
-                const order = await getOrderByReference(orderReference);
-                if (order) {
-                    console.log(`[${sessionId}] Order found in database:`, order.status);
-                }
-            } catch (dbError) {
-                console.warn(`[${sessionId}] Could not fetch order details:`, dbError.message);
+if (orderReference) {
+    console.log(`[${sessionId}] Attempting verification with order reference: ${orderReference}`);
+    
+    try {
+        const order = await getOrderByReference(orderReference);
+        if (order && order.yoco_checkout_id) {
+            console.log(`[${sessionId}] Found order with checkout ID: ${order.yoco_checkout_id}`);
+            
+            const paymentDetails = await verifyYocoPayment(order.yoco_checkout_id);
+            if (paymentDetails && (paymentDetails.status === 'successful' || paymentDetails.status === 'created')) {
+                await updateOrderStatus(order.yoco_checkout_id, 'completed', paymentDetails);
+                
+                const successParams = new URLSearchParams({
+                    status: 'success',
+                    reference: orderReference,
+                    amount: paymentDetails.amount / 100,
+                    timestamp: new Date().toISOString()
+                });
+                
+                res.redirect(`${process.env.FRONTEND_URL}/payment-success.html?${successParams}`);
+                return;
             }
+        } else {
+            console.log(`[${sessionId}] Order found but no checkout ID available`);
         }
+    } catch (dbError) {
+        console.warn(`[${sessionId}] Could not fetch order details:`, dbError.message);
+    }
+}
 
         const successParams = new URLSearchParams({
             status: 'success',
