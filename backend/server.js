@@ -1,4 +1,4 @@
-// SERVER.JS VERSION: 2025-09-17- Fix: Multiple fallback methods verify when checkout ID isn't passed in the URL.
+// SERVER.JS VERSION: 2025-09-26- Fix: Add test endpoint to test the Firebase connection
 // FIREBASE-INTEGRATED - Complete Yoco + Firebase Integration
 // Enhanced Yoco Checkout API with Firebase database, comprehensive error handling, security, and debugging
 
@@ -43,6 +43,34 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public')); // Serve static files from public folder
+
+// Test Firebase connection endpoint (ADD THIS HERE)
+app.get('/test-firebase', async (req, res) => {
+    try {
+        console.log('Testing Firebase connection...');
+        
+        const testDoc = await db.collection('test').add({
+            test: true,
+            timestamp: admin.firestore.FieldValue.serverTimestamp()
+        });
+        
+        console.log('Firebase test successful, doc ID:', testDoc.id);
+        
+        res.json({
+            status: 'success',
+            message: 'Firebase connection working',
+            docId: testDoc.id
+        });
+        
+    } catch (error) {
+        console.error('Firebase test failed:', error);
+        res.status(500).json({
+            status: 'error',
+            message: error.message,
+            code: error.code
+        });
+    }
+});
 
 // Configuration constants
 const YOCO_CONFIG = {
