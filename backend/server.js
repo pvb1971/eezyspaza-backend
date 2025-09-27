@@ -1,4 +1,4 @@
-// SERVER.JS VERSION: 2025-09-27- Fix: Changed /yoco* to /yoco/*splat. Wildcard /yoco/*splat that matches any subpath 
+// SERVER.JS VERSION: 2025-09-27- Fix: Add targeted logging for debugging customer details
 // FIREBASE-INTEGRATED - Complete Yoco + Firebase Integration
 // Enhanced Yoco Checkout API with Firebase database, comprehensive error handling, security, and debugging
 
@@ -288,6 +288,12 @@ app.post('/create-checkout', async (req, res) => {
     try {
         console.log(`[${requestId}] === CHECKOUT REQUEST DEBUG ===`);
         console.log(`[${requestId}] Received from frontend:`, JSON.stringify(req.body, null, 2));
+
+        // INSERT LOGGING HERE: Specific metadata logging for debugging customer fields
+        console.log('Received metadata:', req.body.metadata);
+        const { customer_phone, customer_address } = req.body.metadata || {};
+        if (!customer_phone) console.warn('Empty phone received');
+        if (!customer_address) console.warn('Empty address received');
 
         // Input validation
         const validation = validateCheckoutInput(req.body);
@@ -1141,7 +1147,10 @@ app.get('/admin/orders', async (req, res) => {
 
     } catch (error) {
         console.error('Error fetching admin orders:', error);
-        res.status(500).json({ error: 'Failed to fetch orders' });
+        res.status(500).json({ 
+            error: 'Failed to fetch orders',
+            message: error.message 
+        });
     }
 });
 
