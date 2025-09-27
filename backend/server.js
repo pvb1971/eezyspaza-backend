@@ -1,4 +1,4 @@
-// SERVER.JS VERSION: 2025-09-27- Fix: Revert back to environment variables and fix .env file format
+// SERVER.JS VERSION: 2025-09-27- Fix: Changed /yoco* to /yoco/*splat. Wildcard /yoco/*splat that matches any subpath 
 // FIREBASE-INTEGRATED - Complete Yoco + Firebase Integration
 // Enhanced Yoco Checkout API with Firebase database, comprehensive error handling, security, and debugging
 
@@ -20,17 +20,33 @@ dotenv.config();
 // Initialize Firebase Admin
 if (!admin.apps.length) {
     try {
-        admin.initializeApp({
-            credential: admin.credential.cert({
-                projectId: process.env.FIREBASE_PROJECT_ID,
-                clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-                privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-            }),
-            databaseURL: process.env.FIREBASE_DATABASE_URL
-        });
-        console.log('✅ Firebase Admin initialized successfully');
+        let firebaseConfig;
+        
+        // Try to use JSON file first (for local development)
+        try {
+            const serviceAccount = require('./serviceAccountKey.json');
+            firebaseConfig = {
+                credential: admin.credential.cert(serviceAccount),
+                databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://eezy-spaza-default-rtdb.firebaseio.com/'
+            };
+            console.log('Using JSON file for Firebase credentials');
+        } catch (jsonError) {
+            // Fall back to environment variables (for production)
+            firebaseConfig = {
+                credential: admin.credential.cert({
+                    projectId: process.env.FIREBASE_PROJECT_ID,
+                    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+                    privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+                }),
+                databaseURL: process.env.FIREBASE_DATABASE_URL
+            };
+            console.log('Using environment variables for Firebase credentials');
+        }
+        
+        admin.initializeApp(firebaseConfig);
+        console.log('Firebase Admin initialized successfully');
     } catch (error) {
-        console.error('❌ Firebase Admin initialization failed:', error);
+        console.error('Firebase Admin initialization failed:', error);
     }
 }
 
@@ -1130,7 +1146,7 @@ app.get('/admin/orders', async (req, res) => {
 });
 
 // Error handling middleware for Yoco routes
-app.use('/yoco*', (error, req, res, next) => {
+app.use('/yoco/*splat', (error, req, res, next) => {   
     console.error('Yoco route error:', error);
     res.status(500).json({
         error: 'Payment service error',
