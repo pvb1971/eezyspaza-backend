@@ -1,4 +1,4 @@
-// SERVER.JS VERSION: 2025-09-27- Fix: the FIREBASE_PRIVATE_KEY​ issue, using the JSON file directly 
+// SERVER.JS VERSION: 2025-09-27- Fix: Revert back to environment variables and fix .env file format
 // FIREBASE-INTEGRATED - Complete Yoco + Firebase Integration
 // Enhanced Yoco Checkout API with Firebase database, comprehensive error handling, security, and debugging
 
@@ -20,11 +20,13 @@ dotenv.config();
 // Initialize Firebase Admin
 if (!admin.apps.length) {
     try {
-        const serviceAccount = require('./serviceAccountKey.json');
-        
         admin.initializeApp({
-            credential: admin.credential.cert(serviceAccount),
-            databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://eezy-spaza-default-rtdb.firebaseio.com/'
+            credential: admin.credential.cert({
+                projectId: process.env.FIREBASE_PROJECT_ID,
+                clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+                privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+            }),
+            databaseURL: process.env.FIREBASE_DATABASE_URL
         });
         console.log('✅ Firebase Admin initialized successfully');
     } catch (error) {
