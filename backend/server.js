@@ -1,4 +1,4 @@
-// SERVER.JS VERSION: 2025-09-27- Fix: Add targeted logging for debugging customer details
+// SERVER.JS VERSION: 2025-09-17- Fix: Multiple fallback methods verify when checkout ID isn't passed in the URL.
 // FIREBASE-INTEGRATED - Complete Yoco + Firebase Integration
 // Enhanced Yoco Checkout API with Firebase database, comprehensive error handling, security, and debugging
 
@@ -44,9 +44,9 @@ if (!admin.apps.length) {
         }
         
         admin.initializeApp(firebaseConfig);
-        console.log('Firebase Admin initialized successfully');
+        console.log('✅ Firebase Admin initialized successfully');
     } catch (error) {
-        console.error('Firebase Admin initialization failed:', error);
+        console.error('❌ Firebase Admin initialization failed:', error);
     }
 }
 
@@ -60,7 +60,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public')); // Serve static files from public folder
 
-// Test Firebase connection endpoint (ADD THIS HERE)
+// Test Firebase connection endpoint
 app.get('/test-firebase', async (req, res) => {
     try {
         console.log('Testing Firebase connection...');
@@ -98,19 +98,44 @@ const YOCO_CONFIG = {
     RETRY_ATTEMPTS: 2
 };
 
-// Firebase utility functions
+// UPDATED: Firebase utility functions with improved customer info handling
 async function storeOrder(orderData) {
     try {
         console.log(`[${orderData.request_id}] Storing order in Firebase:`, orderData.order_reference);
 
-        // Store in Firestore
+        // Extract and structure customer info from metadata
+        const customerInfo = {
+            customer_name: orderData.metadata?.customer_name || 'Unknown Customer',
+            customer_email: orderData.metadata?.customer_email || '',
+            customer_phone: orderData.metadata?.customer_phone || '',
+            customer_address: orderData.metadata?.customer_address || '',
+            customer_city: orderData.metadata?.customer_city || '',
+            customer_postal_code: orderData.metadata?.customer_postal_code || '',
+            order_reference: orderData.order_reference,
+            browser_info: orderData.metadata?.browser_info || '',
+            timestamp: orderData.metadata?.timestamp || new Date().toISOString(),
+            subtotal: orderData.metadata?.subtotal || '0',
+            vat: orderData.metadata?.vat || '0',
+            vat_rate: orderData.metadata?.vat_rate || '0.15',
+            item_count: orderData.metadata?.item_count || '0',
+            items: orderData.metadata?.items || '[]'
+        };
+
+        // Store in Firestore with properly structured customer_info
         const docRef = await db.collection('orders').add({
             ...orderData,
+            customer_info: customerInfo, // This ensures customer info is properly stored
             created_at: admin.firestore.FieldValue.serverTimestamp(),
             updated_at: admin.firestore.FieldValue.serverTimestamp()
         });
 
         console.log(`[${orderData.request_id}] Order stored with ID: ${docRef.id}`);
+        console.log(`[${orderData.request_id}] Customer info saved:`, {
+            name: customerInfo.customer_name,
+            phone: customerInfo.customer_phone,
+            address: customerInfo.customer_address
+        });
+        
         return docRef.id;
 
     } catch (error) {
@@ -289,12 +314,6 @@ app.post('/create-checkout', async (req, res) => {
         console.log(`[${requestId}] === CHECKOUT REQUEST DEBUG ===`);
         console.log(`[${requestId}] Received from frontend:`, JSON.stringify(req.body, null, 2));
 
-        // INSERT LOGGING HERE: Specific metadata logging for debugging customer fields
-        console.log('Received metadata:', req.body.metadata);
-        const { customer_phone, customer_address } = req.body.metadata || {};
-        if (!customer_phone) console.warn('Empty phone received');
-        if (!customer_address) console.warn('Empty address received');
-
         // Input validation
         const validation = validateCheckoutInput(req.body);
         if (!validation.isValid) {
@@ -344,7 +363,7 @@ app.post('/create-checkout', async (req, res) => {
         const orderReference = req.body.metadata?.order_reference ||
             `ORDER_${Date.now()}_${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
 
-       
+
         // Prepare Yoco payload - UPDATED to include checkoutId in success URLs
         const yocoPayload = {
             amount: amountInCents,
@@ -355,6 +374,10 @@ app.post('/create-checkout', async (req, res) => {
                 order_reference: orderReference,
                 customer_name: req.body.metadata?.customer_name || 'Customer',
                 customer_email: req.body.metadata?.customer_email || '',
+                customer_phone: req.body.metadata?.customer_phone || '',
+                customer_address: req.body.metadata?.customer_address || '',
+                customer_city: req.body.metadata?.customer_city || '',
+                customer_postal_code: req.body.metadata?.customer_postal_code || '',
                 request_id: requestId,
                 timestamp: new Date().toISOString(),
                 item_count: req.body.items?.length || 0,
@@ -508,7 +531,7 @@ app.post('/create-checkout', async (req, res) => {
                 amount_display: validation.amountFloat,
                 currency: req.body.currency || 'ZAR',
                 items: req.body.items || [],
-                customer_info: req.body.metadata || {},
+                metadata: yocoPayload.metadata, // Include all customer info in metadata
                 yoco_checkout_id: yocoData.id,
                 status: 'pending',
                 request_id: requestId,
@@ -520,7 +543,7 @@ app.post('/create-checkout', async (req, res) => {
             };
 
             console.log(`[${requestId}] Order data prepared for storage:`, orderData);
-            await storeOrder(orderData); // Store in Firebase
+            await storeOrder(orderData); // Store in Firebase with updated function
 
         } catch (dbError) {
             console.error(`[${requestId}] Database storage error (non-critical):`, dbError);
@@ -1147,15 +1170,12 @@ app.get('/admin/orders', async (req, res) => {
 
     } catch (error) {
         console.error('Error fetching admin orders:', error);
-        res.status(500).json({ 
-            error: 'Failed to fetch orders',
-            message: error.message 
-        });
+        res.status(500).json({ error: 'Failed to fetch orders' });
     }
 });
 
 // Error handling middleware for Yoco routes
-app.use('/yoco/*splat', (error, req, res, next) => {   
+app.use('/yoco*', (error, req, res, next) => {
     console.error('Yoco route error:', error);
     res.status(500).json({
         error: 'Payment service error',
