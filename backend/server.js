@@ -1,4 +1,4 @@
-// SERVER.JS VERSION: 2025-09-30- Fix: WhatsApp integration
+// SERVER.JS VERSION: 2025-09-30- Fix: PathError for /yoco* route
 // FIREBASE-INTEGRATED - Complete Yoco + Firebase Integration
 // Enhanced Yoco Checkout API with Firebase database, comprehensive error handling, security, and debugging
 
@@ -1379,7 +1379,7 @@ app.get('/admin/orders', async (req, res) => {
 });
 
 // Error handling middleware for Yoco routes
-app.use('/yoco*', (error, req, res, next) => {
+app.use('/yoco', (error, req, res, next) => {
     console.error('Yoco route error:', error);
     res.status(500).json({
         error: 'Payment service error',
