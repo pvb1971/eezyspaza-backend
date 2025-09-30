@@ -2,18 +2,8 @@
   "name": "eezyspaza-backend",
   "version": "1.0.0",
   "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "axios": "^1.11.0",
-    "cheerio": "^1.1.2",
-    "cors": "^2.8.5",
-    "dotenv": "^17.2.2",
-    "express": "^4.21.2",
-    "firebase-admin": "^13.5.0",
-    "node-fetch": "^3.3.2"
-  },
+  "homepage": "https://github.com/pvb1971/eezyspaza-backend#readme",
+  "description": "",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/pvb1971/eezyspaza-backend.git"
@@ -24,9 +14,24 @@
   "bugs": {
     "url": "https://github.com/pvb1971/eezyspaza-backend/issues"
   },
-  "homepage": "https://github.com/pvb1971/eezyspaza-backend#readme",
-  "description": "",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "set NODE_OPTIONS=--openssl-legacy-provider && node server.js"
+  },
+  "dependencies": {
+    "axios": "^1.12.2",
+    "cheerio": "^1.1.2",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "firebase-admin": "^13.5.0",
+    "node-fetch": "^3.3.2",
+    "twilio": "^5.10.2"
+  },
   "devDependencies": {
-    "eslint": "^9.35.0"
+    "eslint": "^9.36.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   }
 }
