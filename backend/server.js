@@ -1,4 +1,4 @@
-// SERVER.JS VERSION: 2025-09-30- Fix: PathError for /yoco* route
+// SERVER.JS VERSION: 2025-10-01- Fix: Orders to be stored with the created_at field
 // FIREBASE-INTEGRATED - Complete Yoco + Firebase Integration
 // Enhanced Yoco Checkout API with Firebase database, comprehensive error handling, security, and debugging
 
@@ -1345,12 +1345,22 @@ app.get('/orders/customer/:email', async (req, res) => {
 app.get('/admin/orders', async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 20;
+        const limit = parseInt(req.query.limit) || 100; // Increased default to show more orders
         const status = req.query.status;
 
-        let query = db.collection('orders').orderBy('created_at', 'desc');
+        console.log(`Fetching orders - page: ${page}, limit: ${limit}, status: ${status || 'all'}`);
 
-        if (status) {
+        let query = db.collection('orders');
+        
+        // Try to order by created_at, but handle if field doesn't exist
+        try {
+            query = query.orderBy('created_at', 'desc');
+        } catch (orderError) {
+            console.warn('Cannot order by created_at, field may not exist on all documents');
+            // Fallback to no ordering
+        }
+
+        if (status && status !== 'all') {
             query = query.where('status', '==', status);
         }
 
@@ -1358,13 +1368,31 @@ app.get('/admin/orders', async (req, res) => {
 
         const orders = [];
         snapshot.forEach(doc => {
+            const data = doc.data();
             orders.push({
                 id: doc.id,
-                ...doc.data()
+                ...data,
+                // Ensure created_at exists for sorting on frontend
+                created_at: data.created_at || data.createdAt || { _seconds: Date.now() / 1000 }
             });
         });
 
+        // Sort on backend if ordering failed
+        orders.sort((a, b) => {
+            const timeA = a.created_at?._seconds || 0;
+            const timeB = b.created_at?._seconds || 0;
+            return timeB - timeA; // Newest first
+        });
+
+        console.log(`Found ${orders.length} orders`);
+        
+        // Log first order structure for debugging
+        if (orders.length > 0) {
+            console.log('Sample order structure:', JSON.stringify(orders[0], null, 2));
+        }
+
         res.json({
+            success: true,
             page: page,
             limit: limit,
             total_returned: orders.length,
@@ -1374,7 +1402,12 @@ app.get('/admin/orders', async (req, res) => {
 
     } catch (error) {
         console.error('Error fetching admin orders:', error);
-        res.status(500).json({ error: 'Failed to fetch orders' });
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to fetch orders',
+            message: error.message,
+            orders: [] 
+        });
     }
 });
 
