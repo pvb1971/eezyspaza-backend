@@ -1,4 +1,4 @@
-// SERVER.JS VERSION: 2025-10-01- Fix: Orders to be stored with the created_at field
+// SERVER.JS VERSION: 2025-10-01- Fix: Firebase - Preserve line_items from your original request, not returned by Yoco.
 // FIREBASE-INTEGRATED - Complete Yoco + Firebase Integration
 // Enhanced Yoco Checkout API with Firebase database, comprehensive error handling, security, and debugging
 
@@ -713,24 +713,32 @@ if (!redirectUrl) {
 
 // Store order information in Firebase
 try {
+    // Get line items from original request (Yoco doesn't return them)
+    const lineItems = req.body.line_items || [];
+    
+    // Create detailed items array
+    const detailedItems = lineItems.map(item => ({
+        name: item.name,
+        quantity: item.quantity,
+        amount: item.amount,
+        price: item.amount / 100
+    }));
+    
+    const metadata = yocoData.metadata || yocoPayload.metadata || {};
+    
     const orderData = {
         id: yocoData.id,
         amount: yocoData.amount || amountInCents,
-        line_items: yocoData.lineItems || yocoData.line_items, // Store Yoco line items
-        metadata: yocoData.metadata || yocoPayload.metadata,      // Store all metadata
+        line_items: lineItems.length > 0 ? lineItems : null, // Don't store undefined
+        metadata: metadata,
         customer_info: {
-            customer_name: (yocoData.metadata || yocoPayload.metadata).customer_name,
-            customer_email: (yocoData.metadata || yocoPayload.metadata).customer_email,
-            customer_phone: (yocoData.metadata || yocoPayload.metadata).customer_phone,
-            customer_address: (yocoData.metadata || yocoPayload.metadata).customer_address,
-            customer_city: (yocoData.metadata || yocoPayload.metadata).customer_city
+            customer_name: metadata.customer_name || 'Unknown',
+            customer_email: metadata.customer_email || '',
+            customer_phone: metadata.customer_phone || '',
+            customer_address: metadata.customer_address || '',
+            customer_city: metadata.customer_city || ''
         },
-        items: (yocoData.lineItems || yocoData.line_items || req.body.items || []).map(item => ({
-            name: item.description || item.name,
-            quantity: item.quantity,
-            amount: item.amount,
-            price: item.amount / 100
-        })),
+        items: detailedItems.length > 0 ? detailedItems : [], // Store as array, not undefined
         order_reference: orderReference,
         amount_cents: amountInCents,
         amount_display: validation.amountFloat,
@@ -738,16 +746,19 @@ try {
         yoco_checkout_id: yocoData.id,
         status: 'pending',
         request_id: requestId,
+        created_at: new Date(), // Add timestamp for ordering
         urls: {
-            success: req.body.successUrl,
-            cancel: req.body.cancelUrl,
-            failure: req.body.failureUrl
+            success: req.body.successUrl || '',
+            cancel: req.body.cancelUrl || '',
+            failure: req.body.failureUrl || ''
         }
-        // ... other fields
     };
 
     console.log(`[${requestId}] Order data prepared for storage:`, orderData);
-    await storeOrder(orderData); // Store in Firebase with updated function
+    console.log(`[${requestId}] Items being stored (${detailedItems.length}):`, detailedItems);
+    
+    await storeOrder(orderData);
+    console.log(`[${requestId}] Order stored successfully in Firebase`);
 
 } catch (dbError) {
     console.error(`[${requestId}] Database storage error (non-critical):`, dbError);
