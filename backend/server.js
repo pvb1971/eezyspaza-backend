@@ -1,4 +1,4 @@
-// SERVER.JS VERSION: 2025-10-01- Fix: Firebase - Preserve line_items from your original request, not returned by Yoco.
+// SERVER.JS VERSION: 2025-10-01- Fix: Update CORS to allow localhost:3000 (backend for local testing) & localhost:3001 (for React dashboard) requests.
 // FIREBASE-INTEGRATED - Complete Yoco + Firebase Integration
 // Enhanced Yoco Checkout API with Firebase database, comprehensive error handling, security, and debugging
 
@@ -57,7 +57,9 @@ const db = admin.firestore();
 const app = express();
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: ['http://localhost:3001', 'http://localhost:3000', 'https://eezyspaza-backend1.onrender.com'],
+  credentials: true
 app.use(express.json());
 app.use(express.static('public')); // Serve static files from public folder
 
