@@ -60,6 +60,7 @@ const app = express();
 app.use(cors({
   origin: ['http://localhost:3001', 'http://localhost:3000', 'https://eezyspaza-backend1.onrender.com'],
   credentials: true
+}));  // <-- Added missing }));
 app.use(express.json());
 app.use(express.static('public')); // Serve static files from public folder
 
@@ -68,7 +69,6 @@ const twilioClient = twilio(
   process.env.TWILIO_ACCOUNT_SID,
   process.env.TWILIO_AUTH_TOKEN
 );
-
 // WhatsApp notification function
 async function sendWhatsAppNotification(orderData, status) {
   const phoneNumber = orderData.customer_info?.customer_phone || '';
