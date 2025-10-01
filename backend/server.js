@@ -1,4 +1,4 @@
-// SERVER.JS VERSION: 2025-10-01- Fix: Update CORS to allow eezyspaza-backend1.onrender.com.
+// SERVER.JS VERSION: 2025-10-01- Fix: Update CORS - Permissive to allow all origins
 // FIREBASE-INTEGRATED - Complete Yoco + Firebase Integration
 // Enhanced Yoco Checkout API with Firebase database, comprehensive error handling, security, and debugging
 
@@ -56,18 +56,28 @@ const db = admin.firestore();
 // Initialize express app
 const app = express();
 
-// Middleware
+// Middleware - Permissive CORS for mobile app
 app.use(cors({
-  origin: [
-    'http://localhost:3001', 
-    'http://localhost:3000', 
-    'https://eezyspaza-backend1.onrender.com',
-    'file://',  // For local file:// protocol (desktop testing)
-    null        // For Android WebView and direct file access
-  ],
+  origin: function(origin, callback) {
+    // Allow requests with no origin (mobile apps, Postman, etc.)
+    if (!origin) return callback(null, true);
+    
+    // Allow specific origins
+    const allowedOrigins = [
+      'http://localhost:3001',
+      'http://localhost:3000',
+      'https://eezyspaza-backend1.onrender.com'
+    ];
+    
+    if (allowedOrigins.indexOf(origin) !== -1 || origin.startsWith('file://')) {
+      callback(null, true);
+    } else {
+      callback(null, true); // Allow all for now (tighten in production)
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With']
 }));
 app.use(express.json());
 app.use(express.static('public')); // Serve static files from public folder
