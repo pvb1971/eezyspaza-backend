@@ -1,4 +1,4 @@
-// SERVER.JS VERSION: 2025-10-01- Fix: Environment Variables to loaded properly
+// SERVER.JS VERSION: 2025-10-01- Fix: Removed ' );' after the Twilio credential
 // FIREBASE-INTEGRATED - Complete Yoco + Firebase Integration
 // Enhanced Yoco Checkout API with Firebase database, comprehensive error handling, security, and debugging
 
@@ -93,7 +93,6 @@ console.log('Twilio credentials check:');
 console.log('- Account SID:', process.env.TWILIO_ACCOUNT_SID ? 'Loaded' : 'MISSING');
 console.log('- Auth Token:', process.env.TWILIO_AUTH_TOKEN ? 'Loaded' : 'MISSING');
 
-);
 // WhatsApp notification function
 async function sendWhatsAppNotification(orderData, status) {
   const phoneNumber = orderData.customer_info?.customer_phone || '';
