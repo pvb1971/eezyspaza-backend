@@ -1,4 +1,4 @@
-// SERVER.JS VERSION: 2025-10-01- Fix: Removed ' );' after the Twilio credential
+// SERVER.JS VERSION: 2025-10-02 - Fix: WhatsApp Fix Applied
 // FIREBASE-INTEGRATED - Complete Yoco + Firebase Integration
 // Enhanced Yoco Checkout API with Firebase database, comprehensive error handling, security, and debugging
 
@@ -93,38 +93,99 @@ console.log('Twilio credentials check:');
 console.log('- Account SID:', process.env.TWILIO_ACCOUNT_SID ? 'Loaded' : 'MISSING');
 console.log('- Auth Token:', process.env.TWILIO_AUTH_TOKEN ? 'Loaded' : 'MISSING');
 
-// WhatsApp notification function
+// ============================================
+// WHATSAPP NOTIFICATION - CORRECTED VERSION
+// ============================================
+
+// Enhanced WhatsApp notification function with better error handling
 async function sendWhatsAppNotification(orderData, status) {
-  const phoneNumber = orderData.customer_info?.customer_phone || '';
-  
-  if (!phoneNumber || phoneNumber === 'No phone') {
-    console.log('No valid phone number for WhatsApp notification');
-    return { success: false, error: 'No phone number' };
-  }
-  
-  // Format phone number for SA (remove leading 0, add +27)
-  let formattedPhone = phoneNumber.replace(/\s+/g, ''); // Remove spaces
-  if (formattedPhone.startsWith('0')) {
-    formattedPhone = '+27' + formattedPhone.substring(1);
-  } else if (!formattedPhone.startsWith('+')) {
-    formattedPhone = '+27' + formattedPhone;
-  }
-  formattedPhone = `whatsapp:${formattedPhone}`;
-  
-  const customerName = orderData.customer_info?.customer_name || 'Customer';
-  const orderRef = orderData.order_reference?.slice(-8) || 'N/A';
-  const total = (orderData.amount_display || 0).toFixed(2);
-  
-  // Build items list
-  const itemsList = (orderData.items || [])
-    .map(item => `• ${item.name} x${item.quantity}`)
-    .join('\n') || 'No items listed';
-  
-  let message = '';
-  
-  switch(status) {
-    case 'confirmed':
-      message = `🛒 *Order Confirmed*
+  try {
+    // Validate Twilio credentials first
+    if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
+      console.error('Twilio credentials not configured');
+      return { 
+        success: false, 
+        error: 'Twilio not configured',
+        message: 'WhatsApp service is not properly configured'
+      };
+    }
+
+    // Extract phone number with fallbacks
+    const phoneNumber = orderData.customer_info?.customer_phone || 
+                       orderData.metadata?.customer_phone || 
+                       '';
+    
+    if (!phoneNumber || phoneNumber === 'No phone' || phoneNumber.trim() === '') {
+      console.log('No valid phone number for WhatsApp notification');
+      return { 
+        success: false, 
+        error: 'No phone number',
+        message: 'Customer phone number not provided'
+      };
+    }
+    
+    // Enhanced phone number formatting for South African numbers
+    let formattedPhone = phoneNumber.replace(/[\s\-\(\)]/g, ''); // Remove spaces, dashes, parentheses
+    
+    // Handle different SA phone formats
+    if (formattedPhone.startsWith('0')) {
+      // Convert 0XX... to +27XX...
+      formattedPhone = '+27' + formattedPhone.substring(1);
+    } else if (formattedPhone.startsWith('27')) {
+      // Add + if missing
+      formattedPhone = '+' + formattedPhone;
+    } else if (!formattedPhone.startsWith('+')) {
+      // Assume SA number if no country code
+      formattedPhone = '+27' + formattedPhone;
+    }
+    
+    // Validate phone number format (SA numbers should be +27 followed by 9 digits)
+    if (!/^\+27[0-9]{9}$/.test(formattedPhone)) {
+      console.error('Invalid phone number format:', formattedPhone);
+      return { 
+        success: false, 
+        error: 'Invalid phone format',
+        message: `Phone number ${phoneNumber} is not a valid SA number`
+      };
+    }
+    
+    // Add WhatsApp prefix
+    const whatsappNumber = `whatsapp:${formattedPhone}`;
+    
+    // Extract customer info with fallbacks
+    const customerName = orderData.customer_info?.customer_name || 
+                        orderData.metadata?.customer_name || 
+                        'Customer';
+    const orderRef = (orderData.order_reference || 'N/A').slice(-8);
+    const total = (orderData.amount_display || orderData.amount_cents / 100 || 0).toFixed(2);
+    
+    // Build items list with safety checks
+    let itemsList = 'No items listed';
+    if (orderData.items && Array.isArray(orderData.items) && orderData.items.length > 0) {
+      itemsList = orderData.items
+        .map(item => `• ${item.name || 'Item'} x${item.quantity || 1}`)
+        .join('\n');
+    } else if (orderData.metadata?.items) {
+      try {
+        const items = typeof orderData.metadata.items === 'string' 
+          ? JSON.parse(orderData.metadata.items) 
+          : orderData.metadata.items;
+        if (Array.isArray(items) && items.length > 0) {
+          itemsList = items
+            .map(item => `• ${item.name || 'Item'} x${item.quantity || 1}`)
+            .join('\n');
+        }
+      } catch (e) {
+        console.warn('Could not parse items from metadata');
+      }
+    }
+    
+    // Build message based on status
+    let message = '';
+    
+    switch(status) {
+      case 'confirmed':
+        message = `🛒 *Order Confirmed*
 
 Hi ${customerName}!
 
@@ -136,10 +197,10 @@ ${itemsList}
 *Total: R${total}*
 
 We'll notify you when it's out for delivery.`;
-      break;
-      
-    case 'preparing':
-      message = `👨‍🍳 *Order Being Prepared*
+        break;
+        
+      case 'preparing':
+        message = `👨‍🍳 *Order Being Prepared*
 
 Hi ${customerName}!
 
@@ -148,10 +209,10 @@ Your order #${orderRef} is being prepared.
 *Total: R${total}*
 
 You'll be notified when it's on the way!`;
-      break;
-      
-    case 'out_for_delivery':
-      message = `🚚 *Out for Delivery*
+        break;
+        
+      case 'out_for_delivery':
+        message = `🚚 *Out for Delivery*
 
 Hi ${customerName}!
 
@@ -165,10 +226,10 @@ ${itemsList}
 Expected delivery: Within 1-2 hours
 
 Please have payment ready.`;
-      break;
-      
-    case 'delivered':
-      message = `✅ *Order Delivered*
+        break;
+        
+      case 'delivered':
+        message = `✅ *Order Delivered*
 
 Hi ${customerName}!
 
@@ -177,10 +238,10 @@ Your order #${orderRef} has been delivered!
 Thank you for shopping with EezySpaza! 🛍️
 
 We hope to serve you again soon.`;
-      break;
-      
-    default:
-      message = `📦 *Order Update*
+        break;
+        
+      default:
+        message = `📦 *Order Update*
 
 Hi ${customerName}!
 
@@ -189,88 +250,230 @@ Your order #${orderRef} status: ${status}
 Total: R${total}
 
 Thank you for choosing EezySpaza!`;
-  }
-  
-  try {
-    console.log(`Sending WhatsApp to: ${formattedPhone}`);
+    }
     
+    console.log(`Attempting to send WhatsApp to: ${whatsappNumber}`);
+    console.log(`Message preview: ${message.substring(0, 100)}...`);
+    
+    // Send WhatsApp message via Twilio
     const result = await twilioClient.messages.create({
       from: 'whatsapp:+14155238886', // Twilio sandbox number
-      to: formattedPhone,
+      to: whatsappNumber,
       body: message
     });
     
-    console.log('WhatsApp sent successfully:', result.sid);
-    return { success: true, messageId: result.sid };
+    console.log('✅ WhatsApp sent successfully:', result.sid);
+    return { 
+      success: true, 
+      messageId: result.sid,
+      message: 'WhatsApp notification sent successfully'
+    };
+    
   } catch (error) {
-    console.error('WhatsApp error:', error);
-    return { success: false, error: error.message };
+    console.error('❌ WhatsApp error:', error);
+    
+    // Return detailed error information
+    return { 
+      success: false, 
+      error: error.message || 'Unknown error',
+      errorCode: error.code || 'UNKNOWN',
+      errorDetails: error.moreInfo || '',
+      message: `Failed to send WhatsApp: ${error.message}`
+    };
   }
 }
 
 // API endpoint for dashboard to trigger notifications
 app.post('/api/send-whatsapp', async (req, res) => {
-  const { orderId, status, orderData } = req.body;
+  const requestId = `whatsapp_${Date.now()}`;
+  console.log(`[${requestId}] WhatsApp API called`);
+  console.log(`[${requestId}] Request body:`, JSON.stringify(req.body, null, 2));
   
   try {
+    const { orderId, status, orderData } = req.body;
+    
+    // Validate request
+    if (!orderId && !orderData) {
+      console.error(`[${requestId}] Missing required parameters`);
+      return res.status(400).json({ 
+        success: false,
+        error: 'Missing parameters',
+        message: 'Either orderId or orderData is required'
+      });
+    }
+    
     let order = orderData;
     
     // If orderData not provided, fetch from Firebase
     if (!order && orderId) {
-      const orderDoc = await db.collection('orders').doc(orderId).get();
-      if (!orderDoc.exists) {
-        return res.status(404).json({ error: 'Order not found' });
+      console.log(`[${requestId}] Fetching order from Firebase: ${orderId}`);
+      try {
+        const orderDoc = await db.collection('orders').doc(orderId).get();
+        if (!orderDoc.exists) {
+          console.error(`[${requestId}] Order not found: ${orderId}`);
+          return res.status(404).json({ 
+            success: false,
+            error: 'Order not found',
+            message: `No order found with ID: ${orderId}`
+          });
+        }
+        order = orderDoc.data();
+        console.log(`[${requestId}] Order fetched successfully`);
+      } catch (dbError) {
+        console.error(`[${requestId}] Database error:`, dbError);
+        return res.status(500).json({ 
+          success: false,
+          error: 'Database error',
+          message: `Failed to fetch order: ${dbError.message}`
+        });
       }
-      order = orderDoc.data();
     }
     
     if (!order) {
-      return res.status(400).json({ error: 'No order data provided' });
+      console.error(`[${requestId}] No order data available`);
+      return res.status(400).json({ 
+        success: false,
+        error: 'No order data',
+        message: 'No order data provided or found'
+      });
     }
     
-    const result = await sendWhatsAppNotification(order, status || order.status);
+    // Determine status to use
+    const statusToUse = status || order.status || 'confirmed';
+    console.log(`[${requestId}] Sending WhatsApp with status: ${statusToUse}`);
     
-    res.json(result);
+    // Send WhatsApp notification
+    const result = await sendWhatsAppNotification(order, statusToUse);
+    
+    // Log result
+    if (result.success) {
+      console.log(`[${requestId}] ✅ WhatsApp sent successfully`);
+    } else {
+      console.error(`[${requestId}] ❌ WhatsApp failed:`, result.error);
+    }
+    
+    // Return result with proper status code
+    res.status(result.success ? 200 : 500).json(result);
+    
   } catch (error) {
-    console.error('Send WhatsApp error:', error);
-    res.status(500).json({ error: error.message });
+    console.error(`[${requestId}] Unexpected error:`, error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Server error',
+      message: error.message || 'An unexpected error occurred',
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 });
 
-// Update order status endpoint (optional - combines status update + WhatsApp)
+// Update order status endpoint with WhatsApp notification
 app.post('/api/update-order-status', async (req, res) => {
-  const { orderId, newStatus, sendNotification } = req.body;
+  const requestId = `update_${Date.now()}`;
+  console.log(`[${requestId}] Update order status called`);
   
   try {
+    const { orderId, newStatus, sendNotification } = req.body;
+    
+    // Validate input
+    if (!orderId || !newStatus) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Missing parameters',
+        message: 'orderId and newStatus are required'
+      });
+    }
+    
+    console.log(`[${requestId}] Updating order ${orderId} to status: ${newStatus}`);
+    
     const orderRef = db.collection('orders').doc(orderId);
     const orderDoc = await orderRef.get();
     
     if (!orderDoc.exists) {
-      return res.status(404).json({ error: 'Order not found' });
+      console.error(`[${requestId}] Order not found: ${orderId}`);
+      return res.status(404).json({ 
+        success: false,
+        error: 'Order not found',
+        message: `No order found with ID: ${orderId}`
+      });
     }
     
-    // Update status
+    // Update status in database
     await orderRef.update({
       status: newStatus,
-      updated_at: new Date()
+      updated_at: admin.firestore.FieldValue.serverTimestamp()
     });
     
+    console.log(`[${requestId}] Order status updated successfully`);
+    
     // Send WhatsApp if requested
-    let whatsappResult = null;
-    if (sendNotification) {
+    let whatsappResult = { success: false, skipped: true };
+    
+    if (sendNotification === true || sendNotification === 'true') {
+      console.log(`[${requestId}] Sending WhatsApp notification`);
       const orderData = orderDoc.data();
       whatsappResult = await sendWhatsAppNotification(orderData, newStatus);
+    } else {
+      console.log(`[${requestId}] WhatsApp notification skipped (sendNotification: ${sendNotification})`);
     }
     
     res.json({
       success: true,
       orderId,
       newStatus,
-      whatsappSent: whatsappResult?.success || false
+      whatsappSent: whatsappResult.success,
+      whatsappMessage: whatsappResult.message || whatsappResult.error,
+      message: 'Order status updated successfully'
     });
+    
   } catch (error) {
-    console.error('Update order status error:', error);
-    res.status(500).json({ error: error.message });
+    console.error(`[${requestId}] Error:`, error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Server error',
+      message: error.message || 'Failed to update order status'
+    });
+  }
+});
+
+// Test WhatsApp endpoint (for debugging)
+app.post('/api/test-whatsapp', async (req, res) => {
+  try {
+    const { phoneNumber, message } = req.body;
+    
+    if (!phoneNumber) {
+      return res.status(400).json({ error: 'Phone number required' });
+    }
+    
+    // Format phone number
+    let formattedPhone = phoneNumber.replace(/[\s\-\(\)]/g, '');
+    if (formattedPhone.startsWith('0')) {
+      formattedPhone = '+27' + formattedPhone.substring(1);
+    } else if (!formattedPhone.startsWith('+')) {
+      formattedPhone = '+27' + formattedPhone;
+    }
+    
+    const testMessage = message || `Test message from EezySpaza at ${new Date().toLocaleString()}`;
+    
+    const result = await twilioClient.messages.create({
+      from: 'whatsapp:+14155238886',
+      to: `whatsapp:${formattedPhone}`,
+      body: testMessage
+    });
+    
+    res.json({
+      success: true,
+      messageId: result.sid,
+      to: formattedPhone,
+      message: 'Test WhatsApp sent successfully'
+    });
+    
+  } catch (error) {
+    console.error('Test WhatsApp error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      code: error.code
+    });
   }
 });
 
@@ -725,84 +928,84 @@ app.post('/create-checkout', async (req, res) => {
         // UPDATED: Now update the success URLs with checkoutId
         yocoPayload.successUrl = `${req.body.successUrl || 'https://eezyspaza-backend1.onrender.com/yoco-payment-success'}?checkoutId=${yocoData.id}`;
 
-  // Validate redirect URL
-const redirectUrl = yocoData.redirectUrl || yocoData.redirect_url;
-if (!redirectUrl) {
-    console.error(`[${requestId}] No redirect URL in Yoco response:`, yocoData);
-    return res.status(500).json({
-        error: 'Invalid payment service response',
-        message: 'No redirect URL provided',
-        request_id: requestId,
-        yoco_response: process.env.NODE_ENV === 'development' ? yocoData : undefined
-    });
-}
-
-// Store order information in Firebase
-try {
-    // Get line items from original request (Yoco doesn't return them)
-    const lineItems = req.body.line_items || [];
-    
-    // Create detailed items array
-    const detailedItems = lineItems.map(item => ({
-        name: item.name,
-        quantity: item.quantity,
-        amount: item.amount,
-        price: item.amount / 100
-    }));
-    
-    const metadata = yocoData.metadata || yocoPayload.metadata || {};
-    
-    const orderData = {
-        id: yocoData.id,
-        amount: yocoData.amount || amountInCents,
-        line_items: lineItems.length > 0 ? lineItems : null, // Don't store undefined
-        metadata: metadata,
-        customer_info: {
-            customer_name: metadata.customer_name || 'Unknown',
-            customer_email: metadata.customer_email || '',
-            customer_phone: metadata.customer_phone || '',
-            customer_address: metadata.customer_address || '',
-            customer_city: metadata.customer_city || ''
-        },
-        items: detailedItems.length > 0 ? detailedItems : [], // Store as array, not undefined
-        order_reference: orderReference,
-        amount_cents: amountInCents,
-        amount_display: validation.amountFloat,
-        currency: req.body.currency || 'ZAR',
-        yoco_checkout_id: yocoData.id,
-        status: 'pending',
-        request_id: requestId,
-        created_at: new Date(), // Add timestamp for ordering
-        urls: {
-            success: req.body.successUrl || '',
-            cancel: req.body.cancelUrl || '',
-            failure: req.body.failureUrl || ''
+        // Validate redirect URL
+        const redirectUrl = yocoData.redirectUrl || yocoData.redirect_url;
+        if (!redirectUrl) {
+            console.error(`[${requestId}] No redirect URL in Yoco response:`, yocoData);
+            return res.status(500).json({
+                error: 'Invalid payment service response',
+                message: 'No redirect URL provided',
+                request_id: requestId,
+                yoco_response: process.env.NODE_ENV === 'development' ? yocoData : undefined
+            });
         }
-    };
 
-    console.log(`[${requestId}] Order data prepared for storage:`, orderData);
-    console.log(`[${requestId}] Items being stored (${detailedItems.length}):`, detailedItems);
-    
-    await storeOrder(orderData);
-    console.log(`[${requestId}] Order stored successfully in Firebase`);
+        // Store order information in Firebase
+        try {
+            // Get line items from original request (Yoco doesn't return them)
+            const lineItems = req.body.line_items || [];
+            
+            // Create detailed items array
+            const detailedItems = lineItems.map(item => ({
+                name: item.name,
+                quantity: item.quantity,
+                amount: item.amount,
+                price: item.amount / 100
+            }));
+            
+            const metadata = yocoData.metadata || yocoPayload.metadata || {};
+            
+            const orderData = {
+                id: yocoData.id,
+                amount: yocoData.amount || amountInCents,
+                line_items: lineItems.length > 0 ? lineItems : null,
+                metadata: metadata,
+                customer_info: {
+                    customer_name: metadata.customer_name || 'Unknown',
+                    customer_email: metadata.customer_email || '',
+                    customer_phone: metadata.customer_phone || '',
+                    customer_address: metadata.customer_address || '',
+                    customer_city: metadata.customer_city || ''
+                },
+                items: detailedItems.length > 0 ? detailedItems : [],
+                order_reference: orderReference,
+                amount_cents: amountInCents,
+                amount_display: validation.amountFloat,
+                currency: req.body.currency || 'ZAR',
+                yoco_checkout_id: yocoData.id,
+                status: 'pending',
+                request_id: requestId,
+                created_at: new Date(),
+                urls: {
+                    success: req.body.successUrl || '',
+                    cancel: req.body.cancelUrl || '',
+                    failure: req.body.failureUrl || ''
+                }
+            };
 
-} catch (dbError) {
-    console.error(`[${requestId}] Database storage error (non-critical):`, dbError);
-    // Continue even if database storage fails
-}
+            console.log(`[${requestId}] Order data prepared for storage:`, orderData);
+            console.log(`[${requestId}] Items being stored (${detailedItems.length}):`, detailedItems);
+            
+            await storeOrder(orderData);
+            console.log(`[${requestId}] Order stored successfully in Firebase`);
 
-// Return redirect URL
-console.log(`[${requestId}] Checkout successful, redirect URL:`, redirectUrl);
+        } catch (dbError) {
+            console.error(`[${requestId}] Database storage error (non-critical):`, dbError);
+            // Continue even if database storage fails
+        }
 
-res.json({
-    redirectUrl: redirectUrl,
-    order_reference: orderReference,
-    amount_cents: amountInCents,
-    amount_display: validation.amountFloat,
-    currency: req.body.currency || 'ZAR',
-    checkout_id: yocoData.id,
-    request_id: requestId
-});
+        // Return redirect URL
+        console.log(`[${requestId}] Checkout successful, redirect URL:`, redirectUrl);
+
+        res.json({
+            redirectUrl: redirectUrl,
+            order_reference: orderReference,
+            amount_cents: amountInCents,
+            amount_display: validation.amountFloat,
+            currency: req.body.currency || 'ZAR',
+            checkout_id: yocoData.id,
+            request_id: requestId
+        });
 
     } catch (networkError) {
         console.error(`[${requestId}] Network/Server error in checkout:`, networkError);
@@ -1170,37 +1373,37 @@ app.get('/yoco-payment-success', async (req, res) => {
         }
 
         // Try to verify payment using order reference if no checkoutId
-const orderReference = req.query.order_reference || req.query.reference;
+        const orderReference = req.query.order_reference || req.query.reference;
 
-if (orderReference) {
-    console.log(`[${sessionId}] Attempting verification with order reference: ${orderReference}`);
-    
-    try {
-        const order = await getOrderByReference(orderReference);
-        if (order && order.yoco_checkout_id) {
-            console.log(`[${sessionId}] Found order with checkout ID: ${order.yoco_checkout_id}`);
+        if (orderReference) {
+            console.log(`[${sessionId}] Attempting verification with order reference: ${orderReference}`);
             
-            const paymentDetails = await verifyYocoPayment(order.yoco_checkout_id);
-            if (paymentDetails && (paymentDetails.status === 'successful' || paymentDetails.status === 'created')) {
-                await updateOrderStatus(order.yoco_checkout_id, 'completed', paymentDetails);
-                
-                const successParams = new URLSearchParams({
-                    status: 'success',
-                    reference: orderReference,
-                    amount: paymentDetails.amount / 100,
-                    timestamp: new Date().toISOString()
-                });
-                
-                res.redirect(`${process.env.FRONTEND_URL}/payment-success.html?${successParams}`);
-                return;
+            try {
+                const order = await getOrderByReference(orderReference);
+                if (order && order.yoco_checkout_id) {
+                    console.log(`[${sessionId}] Found order with checkout ID: ${order.yoco_checkout_id}`);
+                    
+                    const paymentDetails = await verifyYocoPayment(order.yoco_checkout_id);
+                    if (paymentDetails && (paymentDetails.status === 'successful' || paymentDetails.status === 'created')) {
+                        await updateOrderStatus(order.yoco_checkout_id, 'completed', paymentDetails);
+                        
+                        const successParams = new URLSearchParams({
+                            status: 'success',
+                            reference: orderReference,
+                            amount: paymentDetails.amount / 100,
+                            timestamp: new Date().toISOString()
+                        });
+                        
+                        res.redirect(`${process.env.FRONTEND_URL}/payment-success.html?${successParams}`);
+                        return;
+                    }
+                } else {
+                    console.log(`[${sessionId}] Order found but no checkout ID available`);
+                }
+            } catch (dbError) {
+                console.warn(`[${sessionId}] Could not fetch order details:`, dbError.message);
             }
-        } else {
-            console.log(`[${sessionId}] Order found but no checkout ID available`);
         }
-    } catch (dbError) {
-        console.warn(`[${sessionId}] Could not fetch order details:`, dbError.message);
-    }
-}
 
         const successParams = new URLSearchParams({
             status: 'success',
@@ -1382,7 +1585,7 @@ app.get('/orders/customer/:email', async (req, res) => {
 app.get('/admin/orders', async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 100; // Increased default to show more orders
+        const limit = parseInt(req.query.limit) || 100;
         const status = req.query.status;
 
         console.log(`Fetching orders - page: ${page}, limit: ${limit}, status: ${status || 'all'}`);
@@ -1394,7 +1597,6 @@ app.get('/admin/orders', async (req, res) => {
             query = query.orderBy('created_at', 'desc');
         } catch (orderError) {
             console.warn('Cannot order by created_at, field may not exist on all documents');
-            // Fallback to no ordering
         }
 
         if (status && status !== 'all') {
@@ -1487,6 +1689,7 @@ app.listen(PORT, () => {
     console.log(`📊 Yoco API endpoint: ${YOCO_CONFIG.API_BASE_URL}/checkouts`);
     console.log(`🔑 API key configured: ${process.env.YOCO_SECRET_KEY ? 'Yes' : 'No'}`);
     console.log(`🔥 Firebase configured: ${process.env.FIREBASE_PROJECT_ID ? 'Yes' : 'No'}`);
+    console.log(`📱 Twilio configured: ${process.env.TWILIO_ACCOUNT_SID ? 'Yes' : 'No'}`);
     console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
 
     // Environment validation warnings
@@ -1500,5 +1703,11 @@ app.listen(PORT, () => {
         console.warn('⚠️  Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY in your .env file');
     }
 
-    console.log('✅ Server ready for payments and Firebase operations!');
+    if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
+        console.warn('⚠️  Twilio configuration incomplete!');
+        console.warn('⚠️  Set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN in your .env file');
+        console.warn('⚠️  WhatsApp notifications will not work without Twilio credentials');
+    }
+
+    console.log('✅ Server ready for payments, Firebase operations, and WhatsApp notifications!');
 });
