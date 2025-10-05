@@ -1,6 +1,9 @@
-// SERVER.JS VERSION: 2025-10-02 - Fix: WhatsApp Fix Applied
+// SERVER.JS VERSION: 2025-10-05 - Fix: Integrate product management system fully with payment flow
 // FIREBASE-INTEGRATED - Complete Yoco + Firebase Integration
 // Enhanced Yoco Checkout API with Firebase database, comprehensive error handling, security, and debugging
+// INTEGRATED: Product management operations adapted from client-side code to server-side Firestore Admin SDK
+//             Includes stock updates on payment success, assuming items include 'id' for product reference
+// FIXED: Moved stock deduction to handlePaymentSuccess only (batched) to avoid premature deduction on pending orders
 
 const express = require('express');
 const cors = require('cors');
@@ -505,6 +508,39 @@ app.get('/test-firebase', async (req, res) => {
     }
 });
 
+// ============================================
+// TEST ENDPOINT: SEED PRODUCTS (FOR TESTING ONLY)
+// ============================================
+
+// Add to server.js for testing only
+app.post('/api/test/seed-products', async (req, res) => {
+    try {
+        const testProducts = [
+            { name: 'Coca Cola 2L', price: 25.99, stock: 50, category: 'Beverages' },
+            { name: 'White Bread', price: 14.99, stock: 30, category: 'Bakery' },
+            { name: 'Milk 1L', price: 18.99, stock: 40, category: 'Dairy' }
+        ];
+        
+        const batch = db.batch();
+        
+        for (const product of testProducts) {
+            const docRef = db.collection('products').doc();
+            batch.set(docRef, {
+                ...product,
+                active: true,
+                created_at: admin.firestore.FieldValue.serverTimestamp(),
+                updated_at: admin.firestore.FieldValue.serverTimestamp()
+            });
+        }
+        
+        await batch.commit();
+        
+        res.json({ success: true, message: 'Test products added' });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // Configuration constants
 const YOCO_CONFIG = {
     API_BASE_URL: 'https://payments.yoco.com/api',
@@ -722,6 +758,433 @@ async function makeYocoRequest(url, options = {}) {
         throw error;
     }
 }
+
+// Product management functions (adapted from client-side Realtime DB to Firestore Admin SDK)
+async function updateProduct(productId, productData) {
+  try {
+    await db.collection('products').doc(productId).update({
+      ...productData,
+      updated_at: admin.firestore.FieldValue.serverTimestamp()
+    });
+    console.log(`Product ${productId} updated successfully`);
+    return { success: true, productId };
+  } catch (error) {
+    console.error(`Error updating product ${productId}:`, error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function setProduct(productId, productData) {
+  try {
+    await db.collection('products').doc(productId).set({
+      ...productData,
+      updated_at: admin.firestore.FieldValue.serverTimestamp()
+    });
+    console.log(`Product ${productId} set successfully`);
+    return { success: true, productId };
+  } catch (error) {
+    console.error(`Error setting product ${productId}:`, error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function addProduct(productData) {
+  try {
+    const docRef = await db.collection('products').add({
+      ...productData,
+      created_at: admin.firestore.FieldValue.serverTimestamp(),
+      updated_at: admin.firestore.FieldValue.serverTimestamp()
+    });
+    console.log(`Product added with ID: ${docRef.id}`);
+    return { success: true, productId: docRef.id };
+  } catch (error) {
+    console.error('Error adding product:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function updateProductStock(productId, quantitySold) {
+  try {
+    const productRef = db.collection('products').doc(productId);
+    const productSnap = await productRef.get();
+    if (!productSnap.exists) {
+      throw new Error(`Product ${productId} not found`);
+    }
+    const currentData = productSnap.data();
+    const newStock = (currentData.stock || 0) - quantitySold;
+    if (newStock < 0) {
+      throw new Error(`Insufficient stock for product ${productId}`);
+    }
+    await productRef.update({
+      stock: newStock,
+      updated_at: admin.firestore.FieldValue.serverTimestamp()
+    });
+    console.log(`Product ${productId} stock updated to ${newStock}`);
+    return { success: true, newStock };
+  } catch (error) {
+    console.error(`Error updating stock for ${productId}:`, error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Admin endpoints for products
+app.post('/admin/products', async (req, res) => {
+  const requestId = `addprod_${Date.now()}`;
+  try {
+    console.log(`[${requestId}] Adding product:`, req.body);
+    const result = await addProduct(req.body);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.put('/admin/products/:id', async (req, res) => {
+  const { id } = req.params;
+  const requestId = `updprod_${Date.now()}`;
+  try {
+    console.log(`[${requestId}] Updating product ${id}:`, req.body);
+    const result = await updateProduct(id, req.body);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/admin/products/:id/set', async (req, res) => {
+  const { id } = req.params;
+  const requestId = `setprod_${Date.now()}`;
+  try {
+    console.log(`[${requestId}] Setting product ${id}:`, req.body);
+    const result = await setProduct(id, req.body);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/admin/products', async (req, res) => {
+  try {
+    const snapshot = await db.collection('products').orderBy('updated_at', 'desc').get();
+    const products = [];
+    snapshot.forEach(doc => {
+      products.push({
+        id: doc.id,
+        ...doc.data()
+      });
+    });
+    res.json({ success: true, products });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/admin/products/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const doc = await db.collection('products').doc(id).get();
+    if (!doc.exists) {
+      return res.status(404).json({ success: false, error: 'Product not found' });
+    }
+    res.json({ success: true, product: { id: doc.id, ...doc.data() } });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/admin/products/:id/stock', async (req, res) => {
+  const { id } = req.params;
+  const { quantity } = req.body;
+  const requestId = `stock_${Date.now()}`;
+  try {
+    if (typeof quantity !== 'number') {
+      return res.status(400).json({ success: false, error: 'Quantity must be a number' });
+    }
+    console.log(`[${requestId}] Updating stock for ${id} by ${quantity}`);
+    const result = await updateProductStock(id, Math.abs(quantity));
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============================================
+// PRODUCT MANAGEMENT ENDPOINTS (PUBLIC API)
+// ============================================
+
+// Get all products
+app.get('/api/products', async (req, res) => {
+    const requestId = `products_${Date.now()}`;
+    console.log(`[${requestId}] Fetching all products`);
+    
+    try {
+        const productsRef = db.collection('products');
+        const snapshot = await productsRef
+            .where('active', '==', true)
+            .orderBy('name', 'asc')
+            .get();
+        
+        const products = [];
+        snapshot.forEach(doc => {
+            products.push({
+                id: doc.id,
+                ...doc.data()
+            });
+        });
+        
+        console.log(`[${requestId}] Found ${products.length} products`);
+        
+        res.json({
+            success: true,
+            count: products.length,
+            products: products
+        });
+        
+    } catch (error) {
+        console.error(`[${requestId}] Error fetching products:`, error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch products',
+            message: error.message
+        });
+    }
+});
+
+// Get single product by ID
+app.get('/api/products/:id', async (req, res) => {
+    const requestId = `product_${Date.now()}`;
+    const productId = req.params.id;
+    
+    try {
+        const productDoc = await db.collection('products').doc(productId).get();
+        
+        if (!productDoc.exists) {
+            return res.status(404).json({
+                success: false,
+                error: 'Product not found'
+            });
+        }
+        
+        res.json({
+            success: true,
+            product: {
+                id: productDoc.id,
+                ...productDoc.data()
+            }
+        });
+        
+    } catch (error) {
+        console.error(`[${requestId}] Error fetching product:`, error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch product',
+            message: error.message
+        });
+    }
+});
+
+// Add new product
+app.post('/api/products', async (req, res) => {
+    const requestId = `add_product_${Date.now()}`;
+    console.log(`[${requestId}] Adding new product`);
+    
+    try {
+        const { name, price, stock, category, description, image_url } = req.body;
+        
+        // Validate required fields
+        if (!name || !price || stock === undefined) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required fields',
+                required: ['name', 'price', 'stock']
+            });
+        }
+        
+        const productData = {
+            name,
+            price: parseFloat(price),
+            stock: parseInt(stock),
+            category: category || 'Uncategorized',
+            description: description || '',
+            image_url: image_url || '',
+            active: true,
+            created_at: admin.firestore.FieldValue.serverTimestamp(),
+            updated_at: admin.firestore.FieldValue.serverTimestamp()
+        };
+        
+        const docRef = await db.collection('products').add(productData);
+        
+        console.log(`[${requestId}] Product added with ID: ${docRef.id}`);
+        
+        res.json({
+            success: true,
+            message: 'Product added successfully',
+            productId: docRef.id,
+            product: {
+                id: docRef.id,
+                ...productData
+            }
+        });
+        
+    } catch (error) {
+        console.error(`[${requestId}] Error adding product:`, error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to add product',
+            message: error.message
+        });
+    }
+});
+
+// Update product
+app.put('/api/products/:id', async (req, res) => {
+    const requestId = `update_product_${Date.now()}`;
+    const productId = req.params.id;
+    
+    console.log(`[${requestId}] Updating product: ${productId}`);
+    
+    try {
+        const productRef = db.collection('products').doc(productId);
+        const productDoc = await productRef.get();
+        
+        if (!productDoc.exists) {
+            return res.status(404).json({
+                success: false,
+                error: 'Product not found'
+            });
+        }
+        
+        const updates = {
+            ...req.body,
+            updated_at: admin.firestore.FieldValue.serverTimestamp()
+        };
+        
+        // Remove fields that shouldn't be updated directly
+        delete updates.id;
+        delete updates.created_at;
+        
+        await productRef.update(updates);
+        
+        console.log(`[${requestId}] Product updated successfully`);
+        
+        res.json({
+            success: true,
+            message: 'Product updated successfully',
+            productId: productId
+        });
+        
+    } catch (error) {
+        console.error(`[${requestId}] Error updating product:`, error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to update product',
+            message: error.message
+        });
+    }
+});
+
+// Delete product (soft delete - sets active to false)
+app.delete('/api/products/:id', async (req, res) => {
+    const requestId = `delete_product_${Date.now()}`;
+    const productId = req.params.id;
+    
+    console.log(`[${requestId}] Deleting product: ${productId}`);
+    
+    try {
+        const productRef = db.collection('products').doc(productId);
+        const productDoc = await productRef.get();
+        
+        if (!productDoc.exists) {
+            return res.status(404).json({
+                success: false,
+                error: 'Product not found'
+            });
+        }
+        
+        // Soft delete - just mark as inactive
+        await productRef.update({
+            active: false,
+            deleted_at: admin.firestore.FieldValue.serverTimestamp(),
+            updated_at: admin.firestore.FieldValue.serverTimestamp()
+        });
+        
+        console.log(`[${requestId}] Product deleted successfully`);
+        
+        res.json({
+            success: true,
+            message: 'Product deleted successfully',
+            productId: productId
+        });
+        
+    } catch (error) {
+        console.error(`[${requestId}] Error deleting product:`, error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to delete product',
+            message: error.message
+        });
+    }
+});
+
+// Update product stock after transaction
+app.post('/api/products/update-stock', async (req, res) => {
+    const requestId = `update_stock_${Date.now()}`;
+    console.log(`[${requestId}] Updating product stock`);
+    
+    try {
+        const { items } = req.body; // Array of { productId, quantity }
+        
+        if (!items || !Array.isArray(items)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Items array is required'
+            });
+        }
+        
+        const batch = db.batch();
+        const results = [];
+        
+        for (const item of items) {
+            const productRef = db.collection('products').doc(item.productId);
+            const productDoc = await productRef.get();
+            
+            if (productDoc.exists) {
+                const currentStock = productDoc.data().stock || 0;
+                const newStock = currentStock - item.quantity;
+                
+                batch.update(productRef, {
+                    stock: newStock,
+                    updated_at: admin.firestore.FieldValue.serverTimestamp()
+                });
+                
+                results.push({
+                    productId: item.productId,
+                    oldStock: currentStock,
+                    newStock: newStock,
+                    quantitySold: item.quantity
+                });
+            }
+        }
+        
+        await batch.commit();
+        
+        console.log(`[${requestId}] Stock updated for ${results.length} products`);
+        
+        res.json({
+            success: true,
+            message: 'Stock updated successfully',
+            updates: results
+        });
+        
+    } catch (error) {
+        console.error(`[${requestId}] Error updating stock:`, error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to update stock',
+            message: error.message
+        });
+    }
+});
 
 // Enhanced /create-checkout endpoint with Firebase integration
 app.post('/create-checkout', async (req, res) => {
@@ -945,8 +1408,9 @@ app.post('/create-checkout', async (req, res) => {
             // Get line items from original request (Yoco doesn't return them)
             const lineItems = req.body.line_items || [];
             
-            // Create detailed items array
+            // Create detailed items array - UPDATED to include product 'id' if provided by frontend
             const detailedItems = lineItems.map(item => ({
+                id: item.id || null,  // Assume frontend sends product ID for stock updates
                 name: item.name,
                 quantity: item.quantity,
                 amount: item.amount,
@@ -1254,7 +1718,7 @@ app.post('/yoco-webhook', express.raw({type: 'application/json'}), async (req, r
     }
 });
 
-// Firebase-integrated webhook event handlers
+// Firebase-integrated webhook event handlers - UPDATED with batched product stock updates on success only
 async function handlePaymentSuccess(paymentData, webhookId) {
     console.log(`[${webhookId}] Processing successful payment:`, paymentData);
 
@@ -1270,10 +1734,50 @@ async function handlePaymentSuccess(paymentData, webhookId) {
         if (orderId) {
             console.log(`[${webhookId}] Order ${orderId} marked as completed`);
 
+            // Fetch order data for items
+            const orderDoc = await db.collection('orders').doc(orderId).get();
+            if (orderDoc.exists) {
+                const orderData = orderDoc.data();
+
+                // Update product stocks if items have product ids (assumes frontend sends 'id' in line_items)
+                if (orderData.items && Array.isArray(orderData.items) && orderData.items.length > 0) {
+                    try {
+                        const batch = db.batch();
+                        
+                        for (const item of orderData.items) {
+                            if (item.id) {
+                                const productRef = db.collection('products').doc(item.id);
+                                const productDocSnap = await productRef.get();
+                                
+                                if (productDocSnap.exists) {
+                                    const currentStock = productDocSnap.data().stock || 0;
+                                    const newStock = currentStock - (item.quantity || 1);
+                                    
+                                    batch.update(productRef, {
+                                        stock: newStock,
+                                        updated_at: admin.firestore.FieldValue.serverTimestamp()
+                                    });
+                                    
+                                    console.log(`[${webhookId}] Reducing stock for ${item.name}: ${currentStock} → ${newStock}`);
+                                }
+                            }
+                        }
+                        
+                        await batch.commit();
+                        console.log(`[${webhookId}] Product stock updated successfully for order ${orderId}`);
+                        
+                    } catch (stockError) {
+                        console.error(`[${webhookId}] Error updating product stock:`, stockError);
+                        // Don't throw - payment success shouldn't fail due to stock issues
+                    }
+                } else {
+                    console.warn(`[${webhookId}] No items found in order ${orderId}`);
+                }
+            }
+
             // TODO: Additional success actions:
             // - Clear user's cart
             // - Send confirmation email
-            // - Update inventory
             // - Trigger fulfillment process
         } else {
             console.warn(`[${webhookId}] No order found for checkout ID: ${checkoutId}`);
@@ -1709,5 +2213,5 @@ app.listen(PORT, () => {
         console.warn('⚠️  WhatsApp notifications will not work without Twilio credentials');
     }
 
-    console.log('✅ Server ready for payments, Firebase operations, and WhatsApp notifications!');
+    console.log('✅ Server ready for payments, Firebase operations, WhatsApp notifications, and product management!');
 });
