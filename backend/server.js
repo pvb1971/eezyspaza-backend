@@ -65,12 +65,24 @@ app.use(cors({
 app.use(express.json());
 app.use(express.static('public'));
 
-const twilioClient = twilio(
-  process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN
-);
+// Initialize Twilio with error handling
+let twilioClient = null;
+try {
+  if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+    twilioClient = twilio(
+      process.env.TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_AUTH_TOKEN
+    );
+    console.log('✅ Twilio initialized successfully');
+    console.log('Twilio Account SID:', process.env.TWILIO_ACCOUNT_SID.substring(0, 10) + '...');
+  } else {
+    console.warn('⚠️ Twilio credentials not found - WhatsApp notifications disabled');
+  }
+} catch (twilioError) {
+  console.error('❌ Twilio initialization failed:', twilioError.message);
+}
 
-console.log('Twilio credentials:', process.env.TWILIO_ACCOUNT_SID ? 'Loaded' : 'MISSING');
+console.log('Twilio client status:', twilioClient ? 'Ready' : 'Not configured');
 
 // ============================================
 // PRODUCT MANAGEMENT ENDPOINTS
@@ -263,17 +275,27 @@ app.delete('/api/products/:id', async (req, res) => {
 
 async function sendWhatsAppNotification(orderData, status) {
   try {
+    // Detailed logging for debugging
+    console.log('=== WhatsApp Notification Attempt ===');
+    console.log('Twilio SID configured:', !!process.env.TWILIO_ACCOUNT_SID);
+    console.log('Twilio Token configured:', !!process.env.TWILIO_AUTH_TOKEN);
+    
     if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
+      console.log('WhatsApp skipped: Twilio not configured');
       return { success: false, error: 'Twilio not configured' };
     }
 
     const phoneNumber = orderData.customer_info?.customer_phone || 
                        orderData.metadata?.customer_phone || '';
     
+    console.log('Raw phone number:', phoneNumber);
+    
     if (!phoneNumber || phoneNumber === 'No phone' || phoneNumber.trim() === '') {
+      console.log('WhatsApp skipped: No phone number provided');
       return { success: false, error: 'No phone number' };
     }
     
+    // Format phone number
     let formattedPhone = phoneNumber.replace(/[\s\-\(\)]/g, '');
     
     if (formattedPhone.startsWith('0')) {
@@ -284,8 +306,11 @@ async function sendWhatsAppNotification(orderData, status) {
       formattedPhone = '+27' + formattedPhone;
     }
     
+    console.log('Formatted phone:', formattedPhone);
+    
     if (!/^\+27[0-9]{9}$/.test(formattedPhone)) {
-      return { success: false, error: 'Invalid phone format' };
+      console.log('WhatsApp skipped: Invalid phone format');
+      return { success: false, error: 'Invalid phone format: ' + formattedPhone };
     }
     
     const whatsappNumber = `whatsapp:${formattedPhone}`;
@@ -294,7 +319,16 @@ async function sendWhatsAppNotification(orderData, status) {
     const orderRef = (orderData.order_reference || 'N/A').slice(-8);
     const total = (orderData.amount_display || orderData.amount_cents / 100 || 0).toFixed(2);
     
-    let message = `Order #${orderRef} - Status: ${status}\nTotal: R${total}\nThank you, ${customerName}!`;
+    let message = `EezySpaza Order Update\n\nOrder #${orderRef}\nStatus: ${status}\nTotal: R${total}\n\nThank you, ${customerName}!`;
+    
+    console.log('Sending WhatsApp to:', whatsappNumber);
+    console.log('Message:', message);
+    
+    // Verify Twilio client is initialized
+    if (!twilioClient) {
+      console.error('Twilio client not initialized');
+      return { success: false, error: 'Twilio client not initialized' };
+    }
     
     const result = await twilioClient.messages.create({
       from: 'whatsapp:+14155238886',
@@ -302,10 +336,22 @@ async function sendWhatsAppNotification(orderData, status) {
       body: message
     });
     
+    console.log('✅ WhatsApp sent successfully:', result.sid);
     return { success: true, messageId: result.sid };
     
   } catch (error) {
-    return { success: false, error: error.message };
+    console.error('❌ WhatsApp notification error:', error.message);
+    console.error('Error code:', error.code);
+    console.error('Error status:', error.status);
+    console.error('Full error:', JSON.stringify(error, null, 2));
+    
+    // Return failure but don't block order creation
+    return { 
+      success: false, 
+      error: error.message,
+      code: error.code,
+      status: error.status
+    };
   }
 }
 
