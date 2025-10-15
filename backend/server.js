@@ -773,6 +773,49 @@ app.get('/yoco-payment-failure', async (req, res) => {
     res.redirect(`${process.env.FRONTEND_URL}/payment-failed.html`);
 });
 
+// NEW: Manual WhatsApp notification endpoint for dashboard
+app.post('/api/send-whatsapp', async (req, res) => {
+    const requestId = `whatsapp_${Date.now()}`;
+    console.log(`[${requestId}] Manual WhatsApp notification request`);
+    
+    try {
+        const { orderData, status } = req.body;
+        
+        if (!orderData) {
+            return res.status(400).json({
+                success: false,
+                error: 'Order data required'
+            });
+        }
+        
+        // Send WhatsApp notification
+        const result = await sendWhatsAppNotification(orderData, status || orderData.status || 'update');
+        
+        if (result.success) {
+            console.log(`[${requestId}] WhatsApp sent successfully: ${result.messageId}`);
+            res.json({
+                success: true,
+                message: 'WhatsApp notification sent',
+                messageId: result.messageId
+            });
+        } else {
+            console.log(`[${requestId}] WhatsApp failed: ${result.error}`);
+            res.status(400).json({
+                success: false,
+                error: result.error,
+                details: result
+            });
+        }
+        
+    } catch (error) {
+        console.error(`[${requestId}] Error:`, error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 // Get all orders (completed only)
 app.get('/admin/orders', async (req, res) => {
     try {
