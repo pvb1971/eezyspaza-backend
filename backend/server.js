@@ -627,6 +627,10 @@ app.post('/create-checkout', async (req, res) => {
             price: item.amount / 100
         }));
 
+        // IMPORTANT: Update success URL to include checkoutId for verification
+        const successUrlWithCheckout = `${yocoPayload.successUrl}?checkoutId=${yocoData.id}&orderRef=${orderReference}`;
+        console.log(`[${requestId}] Success URL: ${successUrlWithCheckout}`);
+
         // Store as PENDING - not completed yet
         await storePendingOrder({
             id: yocoData.id,
@@ -647,7 +651,8 @@ app.post('/create-checkout', async (req, res) => {
             amount_display: validation.amountFloat,
             currency: 'ZAR',
             yoco_checkout_id: yocoData.id,
-            request_id: requestId
+            request_id: requestId,
+            success_url_with_checkout: successUrlWithCheckout  // Store for reference
         });
 
         console.log(`[${requestId}] Checkout created, redirect: ${redirectUrl}`);
@@ -671,12 +676,30 @@ app.get('/yoco-payment-success', async (req, res) => {
     const sessionId = `success_${Date.now()}`;
     console.log(`[${sessionId}] === PAYMENT SUCCESS HANDLER ===`);
     console.log(`[${sessionId}] Query params:`, req.query);
+    console.log(`[${sessionId}] Full URL:`, req.url);
     
     try {
-        const { checkoutId, paymentId } = req.query;
+        let checkoutId = req.query.checkoutId;
+        const paymentId = req.query.paymentId;
+        const orderRef = req.query.orderRef || req.query.order_reference;
+        
+        // If no checkoutId, try to get it from pending orders using orderRef
+        if (!checkoutId && orderRef) {
+            console.log(`[${sessionId}] No checkoutId, looking up by order reference: ${orderRef}`);
+            const snapshot = await db.collection('pending_payments')
+                .where('order_reference', '==', orderRef)
+                .limit(1)
+                .get();
+            
+            if (!snapshot.empty) {
+                const pendingOrder = snapshot.docs[0].data();
+                checkoutId = pendingOrder.yoco_checkout_id;
+                console.log(`[${sessionId}] Found checkoutId from order ref: ${checkoutId}`);
+            }
+        }
         
         if (!checkoutId) {
-            console.log(`[${sessionId}] No checkoutId in params`);
+            console.log(`[${sessionId}] No checkoutId found - cannot verify payment`);
             return res.redirect(`${process.env.FRONTEND_URL}/payment-failed.html?error=missing_checkout_id`);
         }
         
@@ -691,10 +714,11 @@ app.get('/yoco-payment-success', async (req, res) => {
         }
         
         console.log(`[${sessionId}] Payment status:`, paymentDetails.status);
+        console.log(`[${sessionId}] Payment ID:`, paymentDetails.paymentId);
         
         // 2. Check if payment was successful
         if (paymentDetails.status === 'successful' || paymentDetails.paymentId) {
-            console.log(`[${sessionId}] Payment successful!`);
+            console.log(`[${sessionId}] ✅ Payment successful!`);
             
             // 3. Get pending order
             const pendingOrder = await getPendingOrderByCheckoutId(checkoutId);
@@ -704,12 +728,15 @@ app.get('/yoco-payment-success', async (req, res) => {
                 return res.redirect(`${process.env.FRONTEND_URL}/payment-failed.html?error=order_not_found`);
             }
             
+            console.log(`[${sessionId}] Found pending order:`, pendingOrder.id);
+            
             // 4. Create completed order (THIS IS WHERE ORDER ACTUALLY GETS CREATED)
             const orderId = await createCompletedOrder(pendingOrder, paymentDetails);
-            console.log(`[${sessionId}] Order created: ${orderId}`);
+            console.log(`[${sessionId}] ✅ Order created: ${orderId}`);
             
             // 5. Clean up pending payment
             await db.collection('pending_payments').doc(pendingOrder.id).delete();
+            console.log(`[${sessionId}] Pending payment cleaned up`);
             
             // 6. Redirect to success
             const successParams = new URLSearchParams({
@@ -724,7 +751,7 @@ app.get('/yoco-payment-success', async (req, res) => {
             
         } else {
             // Payment not successful (failed 3D Secure or other issue)
-            console.log(`[${sessionId}] Payment not successful, status: ${paymentDetails.status}`);
+            console.log(`[${sessionId}] ❌ Payment not successful, status: ${paymentDetails.status}`);
             return res.redirect(`${process.env.FRONTEND_URL}/payment-failed.html?error=payment_not_completed&reason=3d_secure_failed`);
         }
         
