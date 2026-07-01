@@ -1,5 +1,5 @@
 // SERVER.JS - Complete Version with Product Management
-// KEY FIX: Orders only created/completed AFTER payment verification
+// KEY FIX: Add /health route and keep-alive ping 
 
 const express = require('express');
 const cors = require('cors');
@@ -54,7 +54,7 @@ app.use(cors({
     if (allowedOrigins.indexOf(origin) !== -1 || origin.startsWith('file://')) {
       callback(null, true);
     } else {
-      callback(null, true);
+      callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
@@ -91,33 +91,44 @@ console.log('Twilio client status:', twilioClient ? 'Ready' : 'Not configured');
 // Get all products
 app.get('/api/products', async (req, res) => {
     const requestId = `products_${Date.now()}`;
-    console.log(`[${requestId}] Fetching all products`);
-    
+    console.log(`[${requestId}] Fetching products`);
+
     try {
-        const productsRef = db.collection('products');
-        const snapshot = await productsRef
-            .where('active', '==', true)
-            .orderBy('name', 'asc')
-            .get();
-        
-        const products = [];
+        let query = db.collection('products')
+            .where('active', '==', true);
+
+        if (req.query.category) {
+            query = query.where('category', '==', req.query.category);
+        }
+
+        const snapshot = await query.orderBy('name', 'asc').get();
+
+        let products = [];
         snapshot.forEach(doc => {
             products.push({
                 id: doc.id,
                 ...doc.data()
             });
         });
-        
+
+        if (req.query.search) {
+            const search = req.query.search.toLowerCase();
+            products = products.filter(p =>
+                p.name.toLowerCase().includes(search)
+            );
+        }
+
         console.log(`[${requestId}] Found ${products.length} products`);
-        
+
         res.json({
             success: true,
             count: products.length,
-            products: products
+            products
         });
-        
+
     } catch (error) {
         console.error(`[${requestId}] Error:`, error);
+
         res.status(500).json({
             success: false,
             error: 'Failed to fetch products',
@@ -574,12 +585,16 @@ app.post('/create-checkout', async (req, res) => {
         const orderReference = req.body.metadata?.order_reference ||
             `ORDER_${Date.now()}_${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
 
+        // Give the customer 10 minutes to complete 3DS bank approval
+        const checkoutExpiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
         const yocoPayload = {
             amount: amountInCents,
             currency: req.body.currency || 'ZAR',
             cancelUrl: req.body.cancelUrl || 'https://eezyspaza-backend1.onrender.com/yoco-payment-cancel',
             successUrl: req.body.successUrl || 'https://eezyspaza-backend1.onrender.com/yoco-payment-success',
             failureUrl: req.body.failureUrl || 'https://eezyspaza-backend1.onrender.com/yoco-payment-failure',
+            expiresAt: checkoutExpiresAt,
             metadata: {
                 order_reference: orderReference,
                 customer_name: req.body.metadata?.customer_name || 'Customer',
@@ -854,6 +869,8 @@ app.get('/admin/pending-payments', async (req, res) => {
     }
 });
 
+app.get("/health", (req, res) => res.json({ status: "ok", timestamp: new Date().toISOString() }));
+
 app.use((error, req, res, next) => {
     console.error('Server error:', error);
     res.status(500).json({ error: 'Server error', message: error.message });
@@ -866,3 +883,21 @@ app.listen(PORT, () => {
     console.log(`Firebase: ${process.env.FIREBASE_PROJECT_ID ? 'Configured' : 'MISSING'}`);
     console.log('✅ Server ready - Orders only created after payment success!');
 });
+// ─── Keep-alive ping ───────────────────────────────────────────────────────
+// Prevents Render free tier from spinning down during active hours.
+// Pings our own /health endpoint every 10 minutes. Without this, Render
+// sleeps after ~15 min of inactivity and takes 50+ seconds to wake up,
+// causing Yoco redirects to time out and customers to get stuck.
+const KEEP_ALIVE_MS = 10 * 60 * 1000; // 10 minutes
+const SELF_URL = process.env.RENDER_EXTERNAL_URL || 'https://eezyspaza-backend1.onrender.com';
+
+setInterval(async () => {
+    try {
+        const res = await fetch(`${SELF_URL}/health`);
+        console.log(`[keep-alive] ping OK — status ${res.status} at ${new Date().toISOString()}`);
+    } catch (err) {
+        console.warn(`[keep-alive] ping failed: ${err.message}`);
+    }
+}, KEEP_ALIVE_MS);
+
+console.log(`[keep-alive] Self-ping active every 10 min → ${SELF_URL}/health`);
