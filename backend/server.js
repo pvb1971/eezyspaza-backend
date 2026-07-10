@@ -42,25 +42,51 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 const app = express();
 
-// CORS Configuration
+const allowedOrigins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "https://eezyspaza-backend1.onrender.com"
+];
+
 app.use(cors({
-  origin: function(origin, callback) {
-    if (!origin) return callback(null, true);
-    const allowedOrigins = [
-      'http://localhost:3001',
-      'http://localhost:3000',
-      'https://eezyspaza-backend1.onrender.com'
-    ];
-    if (allowedOrigins.indexOf(origin) !== -1 || origin.startsWith('file://')) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With']
+    origin: (origin, callback) => {
+        // Allow requests with no Origin (Android WebView, curl, Postman)
+        if (!origin || allowedOrigins.includes(origin)) {
+            return callback(null, true);
+        }
+
+        console.warn("Blocked CORS origin:", origin);
+        // Reject WITHOUT setting an invalid Access-Control-Allow-Origin header.
+        // Passing `false` to this callback in some cors versions literally sets
+        // the header to the string "false", which browsers treat as an invalid
+        // CORS response and block outright — this avoids that bug.
+        return callback(new Error("Not allowed by CORS"));
+    },
+
+    credentials: true
 }));
+
+// If a request is blocked by CORS above, respond with a clean 403 instead of
+// letting it fall through to the generic Express error handler / crash.
+app.use((err, req, res, next) => {
+    if (err && err.message === "Not allowed by CORS") {
+        return res.status(403).json({ success: false, error: "Origin not allowed" });
+    }
+    next(err);
+});
+
+app.use((req, res, next) => {
+    console.log(
+        new Date().toISOString(),
+        req.method,
+        req.originalUrl,
+        "Origin:",
+        req.headers.origin || "none"
+    );
+    next();
+});
 
 app.use(express.json());
 app.use(express.static('public'));
