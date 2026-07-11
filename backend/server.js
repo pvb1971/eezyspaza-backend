@@ -1,5 +1,5 @@
 // SERVER.JS - Complete Version with Product Management
-// KEY FIX: Add /health route and keep-alive ping 
+// KEY FIX: Add /Revert to Original CORS 
 
 const express = require('express');
 const cors = require('cors');
@@ -42,30 +42,24 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 const app = express();
 
-const allowedOrigins = [
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
-    "https://eezyspaza-backend1.onrender.com"
-];
-
+// CORS Configuration
 app.use(cors({
-    origin: (origin, callback) => {
-        // Allow requests with no Origin (Android WebView, curl, Postman)
-        if (!origin || allowedOrigins.includes(origin)) {
-            return callback(null, true);
-        }
-
-        console.warn("Blocked CORS origin:", origin);
-        // Reject WITHOUT setting an invalid Access-Control-Allow-Origin header.
-        // Passing `false` to this callback in some cors versions literally sets
-        // the header to the string "false", which browsers treat as an invalid
-        // CORS response and block outright — this avoids that bug.
-        return callback(new Error("Not allowed by CORS"));
-    },
-
-    credentials: true
+  origin: function(origin, callback) {
+    if (!origin) return callback(null, true);
+    const allowedOrigins = [
+      'http://localhost:3001',
+      'http://localhost:3000',
+      'https://eezyspaza-backend1.onrender.com'
+    ];
+    if (allowedOrigins.indexOf(origin) !== -1 || origin.startsWith('file://')) {
+      callback(null, true);
+    } else {
+      callback(null, true);
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With']
 }));
 
 // If a request is blocked by CORS above, respond with a clean 403 instead of
