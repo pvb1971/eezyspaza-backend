@@ -1,5 +1,5 @@
 // SERVER.JS - Complete Version with Product Management
-// KEY FIX: Test commit — confirming Render auto-deploy is independent of GitHub PAT
+// KEY FIX: Orders only created/completed AFTER payment verification
 
 const express = require('express');
 const cors = require('cors');
