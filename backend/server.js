@@ -1,5 +1,5 @@
 // SERVER.JS - Complete Version with Product Management
-// KEY FIX: Add /Revert to Original CORS 
+// KEY FIX: Test commit — confirming Render auto-deploy is independent of GitHub PAT
 
 const express = require('express');
 const cors = require('cors');
