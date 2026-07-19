@@ -1,5 +1,5 @@
 // SERVER.JS - Complete Version with Product Management
-// KEY FIX: Orders only created/completed AFTER payment verification
+// KEY FIX: Orders only created/completed AFTER payment verification 06:46 2026/07/19
 
 const express = require('express');
 const cors = require('cors');
@@ -82,7 +82,15 @@ app.use((req, res, next) => {
     next();
 });
 
-app.use(express.json());
+// Capture the raw request body alongside the parsed JSON, so webhook
+// signature verification (which needs the exact raw bytes Yoco signed)
+// works without needing a separate express.raw() route registered before
+// this middleware — one json parser handles every route correctly.
+app.use(express.json({
+    verify: (req, res, buf) => {
+        req.rawBody = buf;
+    }
+}));
 app.use(express.static('public'));
 
 // Initialize Twilio with error handling
@@ -574,6 +582,28 @@ async function makeYocoRequest(url, options = {}) {
     }
 }
 
+// Shared handler: given a Yoco checkoutId, look up the pending order and
+// create the completed order + fire notifications. Used by both the
+// browser redirect handler (/yoco-payment-success) and the webhook
+// (/yoco-webhook), so whichever one arrives first "wins" — the other will
+// simply find no pending order left (already deleted) and skip safely.
+async function completeOrderFromCheckoutId(checkoutId, paymentDetails, sourceLabel) {
+    const pendingOrder = await getPendingOrderByCheckoutId(checkoutId);
+
+    if (!pendingOrder) {
+        console.log(`[${sourceLabel}] No pending order found for checkout ${checkoutId} — likely already completed by another path, or never existed. Skipping.`);
+        return null;
+    }
+
+    const orderId = await createCompletedOrder(pendingOrder, paymentDetails);
+    console.log(`[${sourceLabel}] ✅ Order created: ${orderId}`);
+
+    await db.collection('pending_payments').doc(pendingOrder.id).delete();
+    console.log(`[${sourceLabel}] Pending payment cleaned up`);
+
+    return orderId;
+}
+
 // ============================================
 // PAYMENT ENDPOINTS
 // ============================================
@@ -707,6 +737,9 @@ app.post('/create-checkout', async (req, res) => {
 });
 
 // SUCCESS HANDLER - Creates order ONLY after payment verified
+// (This is the browser-redirect path. See /yoco-webhook below for the
+// server-to-server path, which is the reliable backstop if the customer's
+// browser/WebView never makes it back here.)
 app.get('/yoco-payment-success', async (req, res) => {
     const sessionId = `success_${Date.now()}`;
     console.log(`[${sessionId}] === PAYMENT SUCCESS HANDLER ===`);
@@ -754,31 +787,16 @@ app.get('/yoco-payment-success', async (req, res) => {
         // 2. Check if payment was successful
         if (paymentDetails.status === 'successful' || paymentDetails.paymentId) {
             console.log(`[${sessionId}] ✅ Payment successful!`);
-            
-            // 3. Get pending order
-            const pendingOrder = await getPendingOrderByCheckoutId(checkoutId);
-            
-            if (!pendingOrder) {
-                console.log(`[${sessionId}] No pending order found`);
-                return res.redirect(`${process.env.FRONTEND_URL}/payment-failed.html?error=order_not_found`);
-            }
-            
-            console.log(`[${sessionId}] Found pending order:`, pendingOrder.id);
-            
-            // 4. Create completed order (THIS IS WHERE ORDER ACTUALLY GETS CREATED)
-            const orderId = await createCompletedOrder(pendingOrder, paymentDetails);
-            console.log(`[${sessionId}] ✅ Order created: ${orderId}`);
-            
-            // 5. Clean up pending payment
-            await db.collection('pending_payments').doc(pendingOrder.id).delete();
-            console.log(`[${sessionId}] Pending payment cleaned up`);
-            
+
+            // 3-5. Create the completed order (or skip if the webhook already did)
+            const orderId = await completeOrderFromCheckoutId(checkoutId, paymentDetails, sessionId);
+
             // 6. Redirect to success
             const successParams = new URLSearchParams({
                 status: 'success',
                 reference: paymentDetails.metadata?.order_reference || 'unknown',
                 amount: paymentDetails.amount / 100,
-                order_id: orderId,
+                order_id: orderId || 'already_processed',
                 timestamp: new Date().toISOString()
             });
             
@@ -806,6 +824,81 @@ app.get('/yoco-payment-failure', async (req, res) => {
     const sessionId = `failure_${Date.now()}`;
     console.log(`[${sessionId}] Payment failed`);
     res.redirect(`${process.env.FRONTEND_URL}/payment-failed.html`);
+});
+
+// WEBHOOK - Server-to-server confirmation from Yoco.
+// This is the reliable backstop for /yoco-payment-success: if the
+// customer's browser/WebView never makes it back to this server (closed
+// app, lost signal, navigation glitch), Yoco still calls this endpoint
+// directly once the payment is confirmed, so the order still gets created.
+//
+// Uses req.rawBody (captured by the express.json verify() hook above) to
+// check the signature, if YOCO_WEBHOOK_SECRET is configured. If it isn't
+// configured, the webhook still works but without signature verification —
+// set YOCO_WEBHOOK_SECRET in your environment as soon as you have it from
+// the Yoco dashboard.
+app.post('/yoco-webhook', async (req, res) => {
+    const webhookId = `webhook_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+
+    try {
+        console.log(`[${webhookId}] === YOCO WEBHOOK RECEIVED ===`);
+
+        const signature = req.headers['x-yoco-signature'] || req.headers['webhook-signature'];
+
+        if (process.env.YOCO_WEBHOOK_SECRET) {
+            if (!signature || !req.rawBody) {
+                console.error(`[${webhookId}] Missing signature or raw body — rejecting`);
+                return res.status(401).json({ error: 'Invalid signature' });
+            }
+            const expectedSignature = crypto
+                .createHmac('sha256', process.env.YOCO_WEBHOOK_SECRET)
+                .update(req.rawBody)
+                .digest('hex');
+
+            if (signature !== expectedSignature) {
+                console.error(`[${webhookId}] Invalid webhook signature`);
+                return res.status(401).json({ error: 'Invalid signature' });
+            }
+        } else {
+            console.warn(`[${webhookId}] YOCO_WEBHOOK_SECRET not set — skipping signature verification`);
+        }
+
+        const event = req.body;
+        console.log(`[${webhookId}] Event type:`, event?.type);
+
+        const eventType = (event?.type || '').toLowerCase();
+        const payload = event?.payload || event?.data || {};
+        const checkoutId = payload.id || payload.checkoutId || payload.metadata?.checkoutId;
+        const paymentId = payload.paymentId || payload.id;
+
+        if (!checkoutId) {
+            console.warn(`[${webhookId}] No checkoutId found in webhook payload — nothing to do`);
+            return res.status(200).json({ received: true, webhook_id: webhookId, action: 'no_checkout_id' });
+        }
+
+        if (eventType.includes('succeed') || eventType.includes('success')) {
+            // Confirm with Yoco's API directly rather than trusting the
+            // webhook body alone, same as the browser-redirect path does.
+            const paymentDetails = await verifyYocoPayment(checkoutId, paymentId);
+
+            if (paymentDetails && (paymentDetails.status === 'successful' || paymentDetails.paymentId)) {
+                await completeOrderFromCheckoutId(checkoutId, paymentDetails, webhookId);
+            } else {
+                console.warn(`[${webhookId}] Webhook said success but verification didn't confirm it — not creating order`);
+            }
+        } else {
+            console.log(`[${webhookId}] Event type "${eventType}" doesn't require order creation — logged only`);
+        }
+
+        res.status(200).json({ received: true, webhook_id: webhookId });
+
+    } catch (error) {
+        console.error(`[${webhookId}] Webhook processing error:`, error);
+        // Still return 200 so Yoco doesn't endlessly retry a request that's
+        // failing due to our own bug rather than a real delivery problem —
+        // the error is logged above for investigation either way.
+        res.status(200).json({ received: true, webhook_id: webhookId, error: 'processing_error' });
+    }
 });
 
 // NEW: Manual WhatsApp notification endpoint for dashboard
@@ -891,6 +984,95 @@ app.get('/admin/pending-payments', async (req, res) => {
 
 app.get("/health", (req, res) => res.json({ status: "ok", timestamp: new Date().toISOString() }));
 
+// Diagnostic endpoint: checks API key format, Firebase connectivity, and
+// live connectivity to Yoco's API in one call. Useful for confirming
+// whether an issue is a code/config problem versus something on Yoco's
+// side (e.g. a merchant account under review) before assuming a bug.
+app.get('/yoco-health', async (req, res) => {
+    try {
+        const healthData = {
+            status: 'unknown',
+            timestamp: new Date().toISOString(),
+            checks: {}
+        };
+
+        if (!process.env.YOCO_SECRET_KEY) {
+            healthData.checks.api_key = {
+                status: 'error',
+                message: 'YOCO_SECRET_KEY not configured'
+            };
+        } else {
+            const keyFormat = process.env.YOCO_SECRET_KEY.startsWith('sk_test_') ||
+                             process.env.YOCO_SECRET_KEY.startsWith('sk_live_');
+            const environment = process.env.YOCO_SECRET_KEY.startsWith('sk_test_') ? 'sandbox' : 'live';
+
+            healthData.checks.api_key = {
+                status: keyFormat ? 'ok' : 'warning',
+                message: keyFormat ? 'API key format is valid' : 'API key format may be incorrect',
+                environment: environment
+            };
+        }
+
+        try {
+            await db.collection('health_check').limit(1).get();
+            healthData.checks.firebase = {
+                status: 'ok',
+                message: 'Firebase connected successfully'
+            };
+        } catch (firebaseError) {
+            healthData.checks.firebase = {
+                status: 'error',
+                message: `Firebase connection failed: ${firebaseError.message}`
+            };
+        }
+
+        healthData.checks.webhook_secret = {
+            status: process.env.YOCO_WEBHOOK_SECRET ? 'ok' : 'warning',
+            message: process.env.YOCO_WEBHOOK_SECRET
+                ? 'YOCO_WEBHOOK_SECRET configured — webhook signatures are verified'
+                : 'YOCO_WEBHOOK_SECRET not set — webhook accepts unsigned requests'
+        };
+
+        try {
+            const testResponse = await makeYocoRequest(`${YOCO_CONFIG.API_BASE_URL}/checkouts`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${process.env.YOCO_SECRET_KEY || ''}`
+                }
+            });
+
+            healthData.checks.connectivity = {
+                status: testResponse.status < 500 ? 'ok' : 'warning',
+                message: `Yoco API responded with status ${testResponse.status}`
+            };
+        } catch (connectError) {
+            healthData.checks.connectivity = {
+                status: 'error',
+                message: `Failed to reach Yoco API: ${connectError.message}`
+            };
+        }
+
+        const statuses = Object.values(healthData.checks).map(check => check.status);
+        if (statuses.includes('error')) {
+            healthData.status = 'error';
+        } else if (statuses.includes('warning')) {
+            healthData.status = 'warning';
+        } else {
+            healthData.status = 'ok';
+        }
+
+        const httpStatus = healthData.status === 'error' ? 503 : 200;
+        res.status(httpStatus).json(healthData);
+
+    } catch (error) {
+        res.status(500).json({
+            status: 'error',
+            message: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
 app.use((error, req, res, next) => {
     console.error('Server error:', error);
     res.status(500).json({ error: 'Server error', message: error.message });
@@ -901,6 +1083,7 @@ app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`API key: ${process.env.YOCO_SECRET_KEY ? 'Configured' : 'MISSING'}`);
     console.log(`Firebase: ${process.env.FIREBASE_PROJECT_ID ? 'Configured' : 'MISSING'}`);
+    console.log(`Webhook secret: ${process.env.YOCO_WEBHOOK_SECRET ? 'Configured' : 'Not set (webhook accepts unsigned requests)'}`);
     console.log('✅ Server ready - Orders only created after payment success!');
 });
 // ─── Keep-alive ping ───────────────────────────────────────────────────────
