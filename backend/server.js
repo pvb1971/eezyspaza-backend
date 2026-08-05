@@ -1,5 +1,5 @@
 // SERVER.JS - Complete Version with Product Management
-// KEY FIX: Orders only created/completed AFTER payment verification 06:46 2026/07/19
+// KEY FIX: Swap "email link" for "app WebView" as per Yoco 21:52 2026/08/05 
 
 const express = require('express');
 const cors = require('cors');
@@ -717,6 +717,7 @@ app.post('/create-checkout', async (req, res) => {
             currency: 'ZAR',
             yoco_checkout_id: yocoData.id,
             request_id: requestId,
+            redirectUrl: redirectUrl,  // Needed by GET /pay/:reference to forward the customer
             success_url_with_checkout: successUrlWithCheckout  // Store for reference
         });
 
@@ -733,6 +734,54 @@ app.post('/create-checkout', async (req, res) => {
     } catch (error) {
         console.error(`[${requestId}] Checkout error:`, error);
         res.status(500).json({ error: 'Payment processing error', message: error.message });
+    }
+});
+
+// FORWARDING PAGE - required by Yoco so the customer reaches checkout via a
+// verified website (this domain) instead of arriving with no referrer at all
+// (which happens when a WebView navigates directly to Yoco's URL from a
+// locally-bundled file:// page, or from an email/SMS/WhatsApp link).
+// See: Yoco support - "Sending Yoco Checkout links by email, SMS, WhatsApp or off-website"
+app.get('/pay/:reference', async (req, res) => {
+    try {
+        const snapshot = await db.collection('pending_payments')
+            .where('order_reference', '==', req.params.reference)
+            .limit(1)
+            .get();
+
+        if (snapshot.empty) {
+            return res.status(404).send('<h1>Order not found</h1><p>This payment link may have expired.</p>');
+        }
+
+        const order = snapshot.docs[0].data();
+        if (!order.redirectUrl) {
+            return res.status(500).send('<h1>Payment link unavailable</h1><p>Please contact support.</p>');
+        }
+
+        // IMPORTANT (per Yoco): must be a real page with a client-side JS
+        // redirect. NOT a 301/302 server redirect (loses the referrer),
+        // NOT meta http-equiv="refresh" (inconsistent across browsers),
+        // and no Referrer-Policy of no-referrer/same-origin on this response.
+        res.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+        res.send(`<!doctype html>
+<html>
+<head>
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <title>Redirecting to secure checkout</title>
+</head>
+<body>
+    <p>Taking you to our secure payment page…</p>
+    <script>
+        window.location.replace(${JSON.stringify(order.redirectUrl)});
+    </script>
+    <noscript>
+        <a href="${order.redirectUrl}">Continue to secure checkout</a>
+    </noscript>
+</body>
+</html>`);
+    } catch (error) {
+        console.error('Forwarding page error:', error);
+        res.status(500).send('<h1>Something went wrong</h1><p>Please try again or contact support.</p>');
     }
 });
 
