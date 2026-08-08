@@ -905,6 +905,9 @@ console.log(`[${webhookId}] Signature headers:`, {
 
 console.log(`[${webhookId}] Raw body available:`, !!req.rawBody);
 console.log(`[${webhookId}] Raw body length:`, req.rawBody ? req.rawBody.length : 0);
+console.log(`[${webhookId}] Request content-type:`, req.headers['content-type']);
+console.log(`[${webhookId}] Event body keys:`, Object.keys(req.body || {}));
+console.log(`[${webhookId}] Event body:`, JSON.stringify(req.body, null, 2));
 
         if (process.env.YOCO_WEBHOOK_SECRET) {
             if (!signature || !req.rawBody) {
