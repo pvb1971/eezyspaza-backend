@@ -892,58 +892,91 @@ app.post('/yoco-webhook', async (req, res) => {
     try {
         console.log(`[${webhookId}] === YOCO WEBHOOK RECEIVED ===`);
 
-const signature =
-    req.headers['x-yoco-signature'] ||
-    req.headers['webhook-signature'] ||
-    req.headers['x-yoco-webhook-signature'];
+const signature = req.headers['webhook-signature'];
+const webhookIdHeader = req.headers['webhook-id'];
+const webhookTimestamp = req.headers['webhook-timestamp'];
 
-console.log(`[${webhookId}] Signature headers:`, {
-    'x-yoco-signature': req.headers['x-yoco-signature'] ? 'PRESENT' : 'missing',
-    'webhook-signature': req.headers['webhook-signature'] ? 'PRESENT' : 'missing',
-    'x-yoco-webhook-signature': req.headers['x-yoco-webhook-signature'] ? 'PRESENT' : 'missing'
-});
+if (process.env.YOCO_WEBHOOK_SECRET) {
+    if (!signature || !webhookIdHeader || !webhookTimestamp || !req.rawBody) {
+        console.error(`[${webhookId}] Missing webhook signature headers or raw body`);
+        return res.status(401).json({ error: 'Invalid signature' });
+    }
 
-console.log(`[${webhookId}] Raw body available:`, !!req.rawBody);
-console.log(`[${webhookId}] Raw body length:`, req.rawBody ? req.rawBody.length : 0);
-console.log(`[${webhookId}] Request content-type:`, req.headers['content-type']);
-console.log(`[${webhookId}] Event body keys:`, Object.keys(req.body || {}));
-console.log(`[${webhookId}] Request content-type:`, req.headers['content-type']);
-console.log(`[${webhookId}] Event body:`, JSON.stringify(req.body, null, 2));
+    try {
+        // Yoco webhook secrets use the whsec_ prefix followed by
+        // a Base64-encoded signing key.
+        const secret = process.env.YOCO_WEBHOOK_SECRET;
 
-        if (process.env.YOCO_WEBHOOK_SECRET) {
-            if (!signature || !req.rawBody) {
-                console.error(`[${webhookId}] Missing signature or raw body — rejecting`);
-                return res.status(401).json({ error: 'Invalid signature' });
+        const encodedSecret = secret.startsWith('whsec_')
+            ? secret.substring(6)
+            : secret;
+
+        const secretBytes = Buffer.from(encodedSecret, 'base64');
+
+        // Standard Webhooks signing format:
+        // webhook-id.webhook-timestamp.raw-body
+        const signedPayload =
+            `${webhookIdHeader}.${webhookTimestamp}.${req.rawBody.toString('utf8')}`;
+
+        const expectedSignature = crypto
+            .createHmac('sha256', secretBytes)
+            .update(signedPayload)
+            .digest('base64');
+
+        // Yoco/Standard Webhooks signatures can contain one or more
+        // versioned signatures, e.g. v1,<signature>.
+        const receivedSignatures = signature
+            .split(' ')
+            .map(value => value.trim())
+            .filter(Boolean);
+
+        const signatureValid = receivedSignatures.some(value => {
+            const parts = value.split(',');
+
+            if (parts.length !== 2) {
+                return false;
             }
-            const expectedSignature = crypto
-                .createHmac('sha256', process.env.YOCO_WEBHOOK_SECRET)
-                .update(req.rawBody)
-                .digest('hex');
 
-if (signature !== expectedSignature) {
-    console.error(`[${webhookId}] Invalid webhook signature`);
-    console.error(
-        `[${webhookId}] Received signature format:`,
-        signature ? 'PRESENT' : 'MISSING'
-    );
-    console.error(
-        `[${webhookId}] Expected signature format:`,
-        expectedSignature ? 'GENERATED' : 'NOT GENERATED'
-    );
+            const [version, receivedSignature] = parts;
 
-    return res.status(401).json({ error: 'Invalid signature' });
-}
-        } else {
-            console.warn(`[${webhookId}] YOCO_WEBHOOK_SECRET not set — skipping signature verification`);
+            return version === 'v1' &&
+                crypto.timingSafeEqual(
+                    Buffer.from(receivedSignature),
+                    Buffer.from(expectedSignature)
+                );
+        });
+
+        if (!signatureValid) {
+            console.error(`[${webhookId}] Invalid webhook signature`);
+            return res.status(401).json({ error: 'Invalid signature' });
         }
+
+        console.log(`[${webhookId}] Webhook signature verified successfully`);
+
+    } catch (signatureError) {
+        console.error(
+            `[${webhookId}] Signature verification error:`,
+            signatureError.message
+        );
+        return res.status(401).json({ error: 'Invalid signature' });
+    }
+} else {
+    console.warn(
+        `[${webhookId}] YOCO_WEBHOOK_SECRET not set — skipping signature verification`
+    );
+}
 
         const event = req.body;
         console.log(`[${webhookId}] Event type:`, event?.type);
 
         const eventType = (event?.type || '').toLowerCase();
         const payload = event?.payload || event?.data || {};
-        const checkoutId = payload.id || payload.checkoutId || payload.metadata?.checkoutId;
-        const paymentId = payload.paymentId || payload.id;
+        const checkoutId =
+            payload.metadata?.checkoutId ||
+            payload.checkoutId;
+        const paymentId =
+            payload.id ||
+            payload.paymentId;
 
         if (!checkoutId) {
             console.warn(`[${webhookId}] No checkoutId found in webhook payload — nothing to do`);
