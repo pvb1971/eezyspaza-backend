@@ -519,6 +519,13 @@ async function createCompletedOrder(pendingOrderData, paymentDetails) {
         // This gives us built-in duplicate protection.
         const orderId = `yoco_${pendingOrderData.yoco_checkout_id}`;
 
+        // pendingOrderData carries a stray unprefixed "id" field (the raw
+        // Yoco checkout id, set back in /create-checkout) that would
+        // otherwise silently override this via the spread above. Force it
+        // to the real order document id so downstream code (WhatsApp
+        // tracking writes in particular) points at the right document.
+        orderData.id = orderId;
+
         // Check whether this order already exists
         const existingOrder = await db.collection('orders').doc(orderId).get();
 
