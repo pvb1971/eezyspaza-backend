@@ -91,6 +91,11 @@ app.use(express.json({
         req.rawBody = buf;
     }
 }));
+
+// Twilio sends WhatsApp delivery-status callbacks
+// as application/x-www-form-urlencoded
+app.use(express.urlencoded({ extended: true }));
+
 app.use(express.static('public'));
 
 // Initialize Twilio with error handling
@@ -313,87 +318,151 @@ app.delete('/api/products/:id', async (req, res) => {
 // ============================================
 
 async function sendWhatsAppNotification(orderData, status) {
-  try {
-    // Detailed logging for debugging
-    console.log('=== WhatsApp Notification Attempt ===');
-    console.log('Twilio SID configured:', !!process.env.TWILIO_ACCOUNT_SID);
-    console.log('Twilio Token configured:', !!process.env.TWILIO_AUTH_TOKEN);
-    
-    if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
-      console.log('WhatsApp skipped: Twilio not configured');
-      return { success: false, error: 'Twilio not configured' };
-    }
+    try {
+        // Detailed logging for debugging
+        console.log('=== WhatsApp Notification Attempt ===');
+        console.log('Twilio SID configured:', !!process.env.TWILIO_ACCOUNT_SID);
+        console.log('Twilio Token configured:', !!process.env.TWILIO_AUTH_TOKEN);
 
-    const phoneNumber = orderData.customer_info?.customer_phone || 
-                       orderData.metadata?.customer_phone || '';
-    
-    console.log('Raw phone number:', phoneNumber);
-    
-    if (!phoneNumber || phoneNumber === 'No phone' || phoneNumber.trim() === '') {
-      console.log('WhatsApp skipped: No phone number provided');
-      return { success: false, error: 'No phone number' };
+        if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
+            console.log('WhatsApp skipped: Twilio not configured');
+            return { success: false, error: 'Twilio not configured' };
+        }
+
+        const phoneNumber =
+            orderData.customer_info?.customer_phone ||
+            orderData.metadata?.customer_phone ||
+            '';
+
+        console.log('Raw phone number:', phoneNumber);
+
+        if (
+            !phoneNumber ||
+            phoneNumber === 'No phone' ||
+            phoneNumber.trim() === ''
+        ) {
+            console.log('WhatsApp skipped: No phone number provided');
+            return { success: false, error: 'No phone number' };
+        }
+
+        // Format phone number
+        let formattedPhone = phoneNumber.replace(/[\s\-\(\)]/g, '');
+
+        if (formattedPhone.startsWith('0')) {
+            formattedPhone = '+27' + formattedPhone.substring(1);
+        } else if (formattedPhone.startsWith('27')) {
+            formattedPhone = '+' + formattedPhone;
+        } else if (!formattedPhone.startsWith('+')) {
+            formattedPhone = '+27' + formattedPhone;
+        }
+
+        console.log('Formatted phone:', formattedPhone);
+
+        if (!/^\+27[0-9]{9}$/.test(formattedPhone)) {
+            console.log('WhatsApp skipped: Invalid phone format');
+            return {
+                success: false,
+                error: 'Invalid phone format: ' + formattedPhone
+            };
+        }
+
+        const whatsappNumber = `whatsapp:${formattedPhone}`;
+
+        const customerName =
+            orderData.customer_info?.customer_name ||
+            orderData.metadata?.customer_name ||
+            'Customer';
+
+        const orderRef =
+            (orderData.order_reference || 'N/A').slice(-8);
+
+        const total = (
+            orderData.amount_display ||
+            orderData.amount_cents / 100 ||
+            0
+        ).toFixed(2);
+
+        const message =
+            `EezySpaza Order Update\n\n` +
+            `Order #${orderRef}\n` +
+            `Status: ${status}\n` +
+            `Total: R${total}\n\n` +
+            `Thank you, ${customerName}!`;
+
+        console.log('Sending WhatsApp to:', whatsappNumber);
+        console.log('Message:', message);
+
+        // Verify Twilio client is initialized
+        if (!twilioClient) {
+            console.error('Twilio client not initialized');
+            return {
+                success: false,
+                error: 'Twilio client not initialized'
+            };
+        }
+
+        // Send WhatsApp message
+        const result = await twilioClient.messages.create({
+            from: 'whatsapp:+14155238886',
+            to: whatsappNumber,
+            body: message,
+
+            // Ask Twilio to report delivery-status changes
+            statusCallback:
+                'https://eezyspaza-backend1.onrender.com/twilio/status'
+        });
+
+        console.log('✅ WhatsApp accepted by Twilio');
+        console.log('Twilio Message SID:', result.sid);
+        console.log('Initial Twilio status:', result.status);
+
+        // ============================================
+        // SAVE TWILIO MESSAGE DETAILS TO FIREBASE
+        // ============================================
+
+        // If this is an existing completed order, update it.
+        if (orderData.id) {
+            await db.collection('orders').doc(orderData.id).set({
+                whatsapp: {
+                    message_sid: result.sid,
+                    status: result.status || 'queued',
+                    to: whatsappNumber,
+                    sent_at: admin.firestore.FieldValue.serverTimestamp(),
+                    updated_at: admin.firestore.FieldValue.serverTimestamp()
+                }
+            }, { merge: true });
+
+            console.log(
+                `✅ WhatsApp tracking saved to order ${orderData.id}`
+            );
+        } else {
+            console.warn(
+                'WhatsApp message sent, but orderData.id was not available. ' +
+                'Twilio SID was not linked to an order.'
+            );
+        }
+
+        return {
+            success: true,
+            messageId: result.sid,
+            status: result.status || 'queued'
+        };
+
+    } catch (error) {
+        console.error('❌ WhatsApp notification error:', error.message);
+        console.error('Error code:', error.code);
+        console.error('Error status:', error.status);
+        console.error('Full error:', JSON.stringify(error, null, 2));
+
+        // Return failure but don't block order creation
+        return {
+            success: false,
+            error: error.message,
+            code: error.code,
+            status: error.status
+        };
     }
-    
-    // Format phone number
-    let formattedPhone = phoneNumber.replace(/[\s\-\(\)]/g, '');
-    
-    if (formattedPhone.startsWith('0')) {
-      formattedPhone = '+27' + formattedPhone.substring(1);
-    } else if (formattedPhone.startsWith('27')) {
-      formattedPhone = '+' + formattedPhone;
-    } else if (!formattedPhone.startsWith('+')) {
-      formattedPhone = '+27' + formattedPhone;
-    }
-    
-    console.log('Formatted phone:', formattedPhone);
-    
-    if (!/^\+27[0-9]{9}$/.test(formattedPhone)) {
-      console.log('WhatsApp skipped: Invalid phone format');
-      return { success: false, error: 'Invalid phone format: ' + formattedPhone };
-    }
-    
-    const whatsappNumber = `whatsapp:${formattedPhone}`;
-    const customerName = orderData.customer_info?.customer_name || 
-                        orderData.metadata?.customer_name || 'Customer';
-    const orderRef = (orderData.order_reference || 'N/A').slice(-8);
-    const total = (orderData.amount_display || orderData.amount_cents / 100 || 0).toFixed(2);
-    
-    let message = `EezySpaza Order Update\n\nOrder #${orderRef}\nStatus: ${status}\nTotal: R${total}\n\nThank you, ${customerName}!`;
-    
-    console.log('Sending WhatsApp to:', whatsappNumber);
-    console.log('Message:', message);
-    
-    // Verify Twilio client is initialized
-    if (!twilioClient) {
-      console.error('Twilio client not initialized');
-      return { success: false, error: 'Twilio client not initialized' };
-    }
-    
-    const result = await twilioClient.messages.create({
-      from: 'whatsapp:+14155238886',
-      to: whatsappNumber,
-      body: message
-    });
-    
-    console.log('✅ WhatsApp sent successfully:', result.sid);
-    return { success: true, messageId: result.sid };
-    
-  } catch (error) {
-    console.error('❌ WhatsApp notification error:', error.message);
-    console.error('Error code:', error.code);
-    console.error('Error status:', error.status);
-    console.error('Full error:', JSON.stringify(error, null, 2));
-    
-    // Return failure but don't block order creation
-    return { 
-      success: false, 
-      error: error.message,
-      code: error.code,
-      status: error.status
-    };
-  }
 }
-
 // ============================================
 // YOCO PAYMENT FUNCTIONS
 // ============================================
@@ -524,7 +593,13 @@ async function createCompletedOrder(pendingOrderData, paymentDetails) {
         // ---------------------------------------------------------
         // SEND WHATSAPP — ONLY FOR THE FIRST CREATION
         // ---------------------------------------------------------
-        await sendWhatsAppNotification(orderData, 'completed');
+        await sendWhatsAppNotification(
+            {
+                ...orderData,
+                id: docRef.id
+            },
+            'completed'
+        );
 
         console.log(`Created completed order: ${orderRef.id}`);
 
@@ -812,6 +887,8 @@ app.get('/pay/:reference', async (req, res) => {
             return res.status(500).send('<h1>Payment link unavailable</h1><p>Please contact support.</p>');
         }
 
+
+
         // IMPORTANT (per Yoco): must be a real page with a client-side JS
         // redirect. NOT a 301/302 server redirect (loses the referrer),
         // NOT meta http-equiv="refresh" (inconsistent across browsers),
@@ -1057,6 +1134,206 @@ app.get('/yoco-payment-failure', async (req, res) => {
     const sessionId = `failure_${Date.now()}`;
     console.log(`[${sessionId}] Payment failed`);
     res.redirect(`${process.env.FRONTEND_URL}/payment-failed.html`);
+});
+
+// ============================================
+// TWILIO WHATSAPP DELIVERY STATUS CALLBACK
+// ============================================
+
+app.post('/twilio/status', async (req, res) => {
+    try {
+        const {
+            MessageSid,
+            MessageStatus,
+            To,
+            ErrorCode,
+            ErrorMessage
+        } = req.body;
+
+        console.log('=== TWILIO STATUS UPDATE ===');
+        console.log('Message SID:', MessageSid);
+        console.log('Status:', MessageStatus);
+        console.log('To:', To);
+        console.log('Error Code:', ErrorCode || 'none');
+        console.log('Error Message:', ErrorMessage || 'none');
+
+        if (!MessageSid) {
+            console.warn('Twilio status callback missing MessageSid');
+            return res.status(400).send('Missing MessageSid');
+        }
+
+        // Find the order associated with this Twilio message
+        const snapshot = await db.collection('orders')
+            .where('whatsapp.message_sid', '==', MessageSid)
+            .limit(1)
+            .get();
+
+        if (snapshot.empty) {
+            console.warn(
+                `No order found for Twilio MessageSid: ${MessageSid}`
+            );
+
+            // Acknowledge the callback anyway
+            return res.status(200).send('OK');
+        }
+
+        const doc = snapshot.docs[0];
+
+        const updateData = {
+            'whatsapp.status': MessageStatus || 'unknown',
+            'whatsapp.updated_at':
+                admin.firestore.FieldValue.serverTimestamp()
+        };
+
+        if (To) {
+            updateData['whatsapp.to'] = To;
+        }
+
+        if (ErrorCode) {
+            updateData['whatsapp.error_code'] = ErrorCode;
+        }
+
+        if (ErrorMessage) {
+            updateData['whatsapp.error_message'] = ErrorMessage;
+        }
+
+        if (MessageStatus === 'delivered') {
+            updateData['whatsapp.delivered_at'] =
+                admin.firestore.FieldValue.serverTimestamp();
+        }
+
+        if (MessageStatus === 'read') {
+            updateData['whatsapp.read_at'] =
+                admin.firestore.FieldValue.serverTimestamp();
+        }
+
+        if (
+            MessageStatus === 'failed' ||
+            MessageStatus === 'undelivered'
+        ) {
+            updateData['whatsapp.failed_at'] =
+                admin.firestore.FieldValue.serverTimestamp();
+        }
+
+        await doc.ref.update(updateData);
+
+        console.log(
+            `✅ Firebase WhatsApp status updated`
+        );
+        console.log(`Order: ${doc.id}`);
+        console.log(`Status: ${MessageStatus}`);
+
+        res.status(200).send('OK');
+
+    } catch (error) {
+        console.error(
+            '❌ Twilio status callback error:',
+            error
+        );
+
+        // Acknowledge Twilio so it doesn't repeatedly retry
+        res.status(200).send('OK');
+    }
+});
+
+// ============================================
+// TWILIO WHATSAPP DELIVERY STATUS CALLBACK
+// ============================================
+
+app.post('/twilio/status', async (req, res) => {
+    try {
+        const {
+            MessageSid,
+            MessageStatus,
+            To,
+            ErrorCode,
+            ErrorMessage
+        } = req.body;
+
+        console.log('=== TWILIO STATUS UPDATE ===');
+        console.log('Message SID:', MessageSid);
+        console.log('Status:', MessageStatus);
+        console.log('To:', To);
+        console.log('Error Code:', ErrorCode || 'none');
+        console.log('Error Message:', ErrorMessage || 'none');
+
+        if (!MessageSid) {
+            console.warn('Twilio status callback missing MessageSid');
+            return res.status(400).send('Missing MessageSid');
+        }
+
+        // Find the order associated with this Twilio message
+        const snapshot = await db.collection('orders')
+            .where('whatsapp.message_sid', '==', MessageSid)
+            .limit(1)
+            .get();
+
+        if (snapshot.empty) {
+            console.warn(
+                `No order found for Twilio MessageSid: ${MessageSid}`
+            );
+
+            // Acknowledge the callback anyway
+            return res.status(200).send('OK');
+        }
+
+        const doc = snapshot.docs[0];
+
+        const updateData = {
+            'whatsapp.status': MessageStatus || 'unknown',
+            'whatsapp.updated_at':
+                admin.firestore.FieldValue.serverTimestamp()
+        };
+
+        if (To) {
+            updateData['whatsapp.to'] = To;
+        }
+
+        if (ErrorCode) {
+            updateData['whatsapp.error_code'] = ErrorCode;
+        }
+
+        if (ErrorMessage) {
+            updateData['whatsapp.error_message'] = ErrorMessage;
+        }
+
+        if (MessageStatus === 'delivered') {
+            updateData['whatsapp.delivered_at'] =
+                admin.firestore.FieldValue.serverTimestamp();
+        }
+
+        if (MessageStatus === 'read') {
+            updateData['whatsapp.read_at'] =
+                admin.firestore.FieldValue.serverTimestamp();
+        }
+
+        if (
+            MessageStatus === 'failed' ||
+            MessageStatus === 'undelivered'
+        ) {
+            updateData['whatsapp.failed_at'] =
+                admin.firestore.FieldValue.serverTimestamp();
+        }
+
+        await doc.ref.update(updateData);
+
+        console.log(
+            `✅ Firebase WhatsApp status updated`
+        );
+        console.log(`Order: ${doc.id}`);
+        console.log(`Status: ${MessageStatus}`);
+
+        res.status(200).send('OK');
+
+    } catch (error) {
+        console.error(
+            '❌ Twilio status callback error:',
+            error
+        );
+
+        // Acknowledge Twilio so it doesn't repeatedly retry
+        res.status(200).send('OK');
+    }
 });
 
 // WEBHOOK - Server-to-server confirmation from Yoco.
