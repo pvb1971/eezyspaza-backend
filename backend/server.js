@@ -638,11 +638,18 @@ app.post('/create-checkout', async (req, res) => {
         // Give the customer 10 minutes to complete 3DS bank approval
         const checkoutExpiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
+        const baseSuccessUrl =
+            req.body.successUrl ||
+            'https://eezyspaza-backend1.onrender.com/yoco-payment-success';
+
+        const successUrl = new URL(baseSuccessUrl);
+        successUrl.searchParams.set('orderRef', orderReference);
+
         const yocoPayload = {
             amount: amountInCents,
             currency: req.body.currency || 'ZAR',
             cancelUrl: req.body.cancelUrl || 'https://eezyspaza-backend1.onrender.com/yoco-payment-cancel',
-            successUrl: req.body.successUrl || 'https://eezyspaza-backend1.onrender.com/yoco-payment-success',
+            successUrl: successUrl.toString(),
             failureUrl: req.body.failureUrl || 'https://eezyspaza-backend1.onrender.com/yoco-payment-failure',
             expiresAt: checkoutExpiresAt,
             metadata: {
@@ -692,10 +699,6 @@ app.post('/create-checkout', async (req, res) => {
             price: item.amount / 100
         }));
 
-        // IMPORTANT: Update success URL to include checkoutId for verification
-        const successUrlWithCheckout = `${yocoPayload.successUrl}?checkoutId=${yocoData.id}&orderRef=${orderReference}`;
-        console.log(`[${requestId}] Success URL: ${successUrlWithCheckout}`);
-
         // Store as PENDING - not completed yet
         await storePendingOrder({
             id: yocoData.id,
@@ -718,7 +721,7 @@ app.post('/create-checkout', async (req, res) => {
             yoco_checkout_id: yocoData.id,
             request_id: requestId,
             redirectUrl: redirectUrl,  // Needed by GET /pay/:reference to forward the customer
-            success_url_with_checkout: successUrlWithCheckout  // Store for reference
+            success_url: yocoPayload.successUrl  // Store for reference
         });
 
         console.log(`[${requestId}] Checkout created, redirect: ${redirectUrl}`);
@@ -785,81 +788,211 @@ app.get('/pay/:reference', async (req, res) => {
     }
 });
 
-// SUCCESS HANDLER - Creates order ONLY after payment verified
-// (This is the browser-redirect path. See /yoco-webhook below for the
-// server-to-server path, which is the reliable backstop if the customer's
-// browser/WebView never makes it back here.)
+// SUCCESS HANDLER
+// Customer-facing browser return from Yoco.
+//
+// IMPORTANT:
+// The webhook remains the authoritative server-to-server payment confirmation.
+// This route only handles the customer's return to the app.
+//
+// If the webhook already completed the order, this route will detect the
+// completed order and show success without creating a duplicate order.
+
 app.get('/yoco-payment-success', async (req, res) => {
     const sessionId = `success_${Date.now()}`;
+
     console.log(`[${sessionId}] === PAYMENT SUCCESS HANDLER ===`);
     console.log(`[${sessionId}] Query params:`, req.query);
     console.log(`[${sessionId}] Full URL:`, req.url);
-    
+
     try {
         let checkoutId = req.query.checkoutId;
         const paymentId = req.query.paymentId;
-        const orderRef = req.query.orderRef || req.query.order_reference;
-        
-        // If no checkoutId, try to get it from pending orders using orderRef
+        const orderRef =
+            req.query.orderRef ||
+            req.query.order_reference;
+
+        // ---------------------------------------------------------
+        // 1. We normally receive orderRef from Yoco.
+        //    Use it to find the pending payment and checkout ID.
+        // ---------------------------------------------------------
+
         if (!checkoutId && orderRef) {
-            console.log(`[${sessionId}] No checkoutId, looking up by order reference: ${orderRef}`);
-            const snapshot = await db.collection('pending_payments')
+            console.log(
+                `[${sessionId}] Looking up checkout by order reference: ${orderRef}`
+            );
+
+            const pendingSnapshot = await db
+                .collection('pending_payments')
                 .where('order_reference', '==', orderRef)
                 .limit(1)
                 .get();
-            
-            if (!snapshot.empty) {
-                const pendingOrder = snapshot.docs[0].data();
+
+            if (!pendingSnapshot.empty) {
+                const pendingOrder = pendingSnapshot.docs[0].data();
+
                 checkoutId = pendingOrder.yoco_checkout_id;
-                console.log(`[${sessionId}] Found checkoutId from order ref: ${checkoutId}`);
+
+                console.log(
+                    `[${sessionId}] Found checkoutId from pending payment: ${checkoutId}`
+                );
             }
         }
-        
+
+        // ---------------------------------------------------------
+        // 2. If the webhook already processed the payment, the
+        //    pending payment may already have been deleted.
+        //
+        //    In that case, look for the completed order.
+        // ---------------------------------------------------------
+
+        if (!checkoutId && orderRef) {
+            console.log(
+                `[${sessionId}] Pending payment not found. Checking completed orders.`
+            );
+
+            const orderSnapshot = await db
+                .collection('orders')
+                .where('order_reference', '==', orderRef)
+                .limit(1)
+                .get();
+
+            if (!orderSnapshot.empty) {
+                const completedOrder = orderSnapshot.docs[0].data();
+
+                const orderId = orderSnapshot.docs[0].id;
+
+                console.log(
+                    `[${sessionId}] ✅ Order already completed by webhook: ${orderId}`
+                );
+
+                const successParams = new URLSearchParams({
+                    status: 'success',
+                    reference: orderRef,
+                    amount: String(
+                        completedOrder.amount_display ??
+                        (completedOrder.amount_cents || 0) / 100
+                    ),
+                    order_id: orderId,
+                    timestamp: new Date().toISOString()
+                });
+
+                return res.redirect(
+                    `${process.env.FRONTEND_URL}/payment-success.html?${successParams.toString()}`
+                );
+            }
+        }
+
+        // ---------------------------------------------------------
+        // 3. Still no checkout ID?
+        //    Then we genuinely cannot verify this return.
+        // ---------------------------------------------------------
+
         if (!checkoutId) {
-            console.log(`[${sessionId}] No checkoutId found - cannot verify payment`);
-            return res.redirect(`${process.env.FRONTEND_URL}/payment-failed.html?error=missing_checkout_id`);
+            console.log(
+                `[${sessionId}] No checkoutId found for orderRef: ${orderRef || 'none'}`
+            );
+
+            return res.redirect(
+                `${process.env.FRONTEND_URL}/payment-failed.html?error=missing_checkout_id`
+            );
         }
-        
-        console.log(`[${sessionId}] Verifying payment for checkout: ${checkoutId}`);
-        
-        // 1. Verify payment with Yoco
-        const paymentDetails = await verifyYocoPayment(checkoutId, paymentId);
-        
+
+        console.log(
+            `[${sessionId}] Verifying payment for checkout: ${checkoutId}`
+        );
+
+        // ---------------------------------------------------------
+        // 4. Verify directly with Yoco.
+        // ---------------------------------------------------------
+
+        const paymentDetails =
+            await verifyYocoPayment(checkoutId, paymentId);
+
         if (!paymentDetails) {
-            console.log(`[${sessionId}] Payment verification failed - no details returned`);
-            return res.redirect(`${process.env.FRONTEND_URL}/payment-failed.html?error=verification_failed`);
+            console.log(
+                `[${sessionId}] Payment verification failed - no details returned`
+            );
+
+            return res.redirect(
+                `${process.env.FRONTEND_URL}/payment-failed.html?error=verification_failed`
+            );
         }
-        
-        console.log(`[${sessionId}] Payment status:`, paymentDetails.status);
-        console.log(`[${sessionId}] Payment ID:`, paymentDetails.paymentId);
-        
-        // 2. Check if payment was successful
-        if (paymentDetails.status === 'successful' || paymentDetails.paymentId) {
-            console.log(`[${sessionId}] ✅ Payment successful!`);
 
-            // 3-5. Create the completed order (or skip if the webhook already did)
-            const orderId = await completeOrderFromCheckoutId(checkoutId, paymentDetails, sessionId);
+        console.log(
+            `[${sessionId}] Payment status:`,
+            paymentDetails.status
+        );
 
-            // 6. Redirect to success
+        console.log(
+            `[${sessionId}] Payment ID:`,
+            paymentDetails.paymentId
+        );
+
+        // ---------------------------------------------------------
+        // 5. Payment verified.
+        //    completeOrderFromCheckoutId() is already designed to
+        //    safely skip if the webhook completed it first.
+        // ---------------------------------------------------------
+
+        if (
+            paymentDetails.status === 'successful' ||
+            paymentDetails.status === 'completed' ||
+            paymentDetails.paymentId
+        ) {
+            console.log(
+                `[${sessionId}] ✅ Payment successful!`
+            );
+
+            const orderId =
+                await completeOrderFromCheckoutId(
+                    checkoutId,
+                    paymentDetails,
+                    sessionId
+                );
+
             const successParams = new URLSearchParams({
                 status: 'success',
-                reference: paymentDetails.metadata?.order_reference || 'unknown',
-                amount: paymentDetails.amount / 100,
-                order_id: orderId || 'already_processed',
-                timestamp: new Date().toISOString()
+                reference:
+                    paymentDetails.metadata?.order_reference ||
+                    orderRef ||
+                    'unknown',
+                amount: String(
+                    paymentDetails.amount / 100
+                ),
+                order_id:
+                    orderId ||
+                    'already_processed',
+                timestamp:
+                    new Date().toISOString()
             });
-            
-            return res.redirect(`${process.env.FRONTEND_URL}/payment-success.html?${successParams}`);
-            
-        } else {
-            // Payment not successful (failed 3D Secure or other issue)
-            console.log(`[${sessionId}] ❌ Payment not successful, status: ${paymentDetails.status}`);
-            return res.redirect(`${process.env.FRONTEND_URL}/payment-failed.html?error=payment_not_completed&reason=3d_secure_failed`);
+
+            return res.redirect(
+                `${process.env.FRONTEND_URL}/payment-success.html?${successParams.toString()}`
+            );
         }
-        
+
+        // ---------------------------------------------------------
+        // 6. Payment did not complete.
+        // ---------------------------------------------------------
+
+        console.log(
+            `[${sessionId}] ❌ Payment not successful, status: ${paymentDetails.status}`
+        );
+
+        return res.redirect(
+            `${process.env.FRONTEND_URL}/payment-failed.html?error=payment_not_completed`
+        );
+
     } catch (error) {
-        console.error(`[${sessionId}] Error:`, error);
-        return res.redirect(`${process.env.FRONTEND_URL}/payment-failed.html?error=processing_error`);
+        console.error(
+            `[${sessionId}] Success handler error:`,
+            error
+        );
+
+        return res.redirect(
+            `${process.env.FRONTEND_URL}/payment-failed.html?error=processing_error`
+        );
     }
 });
 
