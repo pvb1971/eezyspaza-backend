@@ -570,29 +570,6 @@ async function createCompletedOrder(pendingOrderData, paymentDetails) {
     }
 }
 
-        // ---------------------------------------------------------
-        // SEND WHATSAPP — ONLY FOR THE FIRST CREATION
-        // ---------------------------------------------------------
-        await sendWhatsAppNotification(
-            {
-                ...orderData,
-                id: docRef.id
-            },
-            'completed'
-        );
-
-        // Send WhatsApp notification
-        await sendWhatsAppNotification(orderData, 'completed');
-
-        console.log(`Created completed order: ${orderId}`);
-        return orderId;
-
-    } catch (error) {
-        console.error('Error creating completed order:', error);
-        throw error;
-    }
-}
-
 // Get pending order by checkout ID
 async function getPendingOrderByCheckoutId(checkoutId) {
     try {
@@ -1116,106 +1093,6 @@ app.get('/yoco-payment-failure', async (req, res) => {
     const sessionId = `failure_${Date.now()}`;
     console.log(`[${sessionId}] Payment failed`);
     res.redirect(`${process.env.FRONTEND_URL}/payment-failed.html`);
-});
-
-// ============================================
-// TWILIO WHATSAPP DELIVERY STATUS CALLBACK
-// ============================================
-
-app.post('/twilio/status', async (req, res) => {
-    try {
-        const {
-            MessageSid,
-            MessageStatus,
-            To,
-            ErrorCode,
-            ErrorMessage
-        } = req.body;
-
-        console.log('=== TWILIO STATUS UPDATE ===');
-        console.log('Message SID:', MessageSid);
-        console.log('Status:', MessageStatus);
-        console.log('To:', To);
-        console.log('Error Code:', ErrorCode || 'none');
-        console.log('Error Message:', ErrorMessage || 'none');
-
-        if (!MessageSid) {
-            console.warn('Twilio status callback missing MessageSid');
-            return res.status(400).send('Missing MessageSid');
-        }
-
-        // Find the order associated with this Twilio message
-        const snapshot = await db.collection('orders')
-            .where('whatsapp.message_sid', '==', MessageSid)
-            .limit(1)
-            .get();
-
-        if (snapshot.empty) {
-            console.warn(
-                `No order found for Twilio MessageSid: ${MessageSid}`
-            );
-
-            // Acknowledge the callback anyway
-            return res.status(200).send('OK');
-        }
-
-        const doc = snapshot.docs[0];
-
-        const updateData = {
-            'whatsapp.status': MessageStatus || 'unknown',
-            'whatsapp.updated_at':
-                admin.firestore.FieldValue.serverTimestamp()
-        };
-
-        if (To) {
-            updateData['whatsapp.to'] = To;
-        }
-
-        if (ErrorCode) {
-            updateData['whatsapp.error_code'] = ErrorCode;
-        }
-
-        if (ErrorMessage) {
-            updateData['whatsapp.error_message'] = ErrorMessage;
-        }
-
-        if (MessageStatus === 'delivered') {
-            updateData['whatsapp.delivered_at'] =
-                admin.firestore.FieldValue.serverTimestamp();
-        }
-
-        if (MessageStatus === 'read') {
-            updateData['whatsapp.read_at'] =
-                admin.firestore.FieldValue.serverTimestamp();
-        }
-
-        if (
-            MessageStatus === 'failed' ||
-            MessageStatus === 'undelivered'
-        ) {
-            updateData['whatsapp.failed_at'] =
-                admin.firestore.FieldValue.serverTimestamp();
-        }
-
-        await doc.ref.update(updateData);
-
-        console.log(
-            `✅ Firebase WhatsApp status updated`
-        );
-        console.log(`Order: ${doc.id}`);
-        console.log(`Status: ${MessageStatus}`);
-
-        res.status(200).send('OK');
-
-    } catch (error) {
-        console.error(
-            '❌ Twilio status callback error:',
-            error
-        );
-
-        // Acknowledge Twilio so it doesn't repeatedly retry
-        res.status(200).send('OK');
-    }
 });
 
 // ============================================
