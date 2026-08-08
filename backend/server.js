@@ -1,5 +1,5 @@
 // SERVER.JS - Complete Version with Product Management
-// KEY FIX: Swap "email link" for "app WebView" as per Yoco 21:52 2026/08/05 
+// KEY FIX: Fix/identify signature verification 06:05 2026/08/08 
 
 const express = require('express');
 const cors = require('cors');
@@ -892,7 +892,19 @@ app.post('/yoco-webhook', async (req, res) => {
     try {
         console.log(`[${webhookId}] === YOCO WEBHOOK RECEIVED ===`);
 
-        const signature = req.headers['x-yoco-signature'] || req.headers['webhook-signature'];
+const signature =
+    req.headers['x-yoco-signature'] ||
+    req.headers['webhook-signature'] ||
+    req.headers['x-yoco-webhook-signature'];
+
+console.log(`[${webhookId}] Signature headers:`, {
+    'x-yoco-signature': req.headers['x-yoco-signature'] ? 'PRESENT' : 'missing',
+    'webhook-signature': req.headers['webhook-signature'] ? 'PRESENT' : 'missing',
+    'x-yoco-webhook-signature': req.headers['x-yoco-webhook-signature'] ? 'PRESENT' : 'missing'
+});
+
+console.log(`[${webhookId}] Raw body available:`, !!req.rawBody);
+console.log(`[${webhookId}] Raw body length:`, req.rawBody ? req.rawBody.length : 0);
 
         if (process.env.YOCO_WEBHOOK_SECRET) {
             if (!signature || !req.rawBody) {
@@ -904,10 +916,19 @@ app.post('/yoco-webhook', async (req, res) => {
                 .update(req.rawBody)
                 .digest('hex');
 
-            if (signature !== expectedSignature) {
-                console.error(`[${webhookId}] Invalid webhook signature`);
-                return res.status(401).json({ error: 'Invalid signature' });
-            }
+if (signature !== expectedSignature) {
+    console.error(`[${webhookId}] Invalid webhook signature`);
+    console.error(
+        `[${webhookId}] Received signature format:`,
+        signature ? 'PRESENT' : 'MISSING'
+    );
+    console.error(
+        `[${webhookId}] Expected signature format:`,
+        expectedSignature ? 'GENERATED' : 'NOT GENERATED'
+    );
+
+    return res.status(401).json({ error: 'Invalid signature' });
+}
         } else {
             console.warn(`[${webhookId}] YOCO_WEBHOOK_SECRET not set — skipping signature verification`);
         }
