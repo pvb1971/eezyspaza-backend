@@ -504,19 +504,8 @@ async function storePendingOrder(orderData) {
 }
 
 // NEW: Create actual order AFTER payment success
-// Uses the Yoco checkout ID as a deterministic Firestore document ID
-// so the same payment cannot create two orders.
 async function createCompletedOrder(pendingOrderData, paymentDetails) {
     try {
-        const checkoutId =
-            pendingOrderData.yoco_checkout_id ||
-            paymentDetails?.id ||
-            paymentDetails?.checkoutId;
-
-        if (!checkoutId) {
-            throw new Error('Cannot create order: Yoco checkout ID is missing');
-        }
-
         const orderData = {
             ...pendingOrderData,
             payment_details: paymentDetails,
@@ -526,45 +515,24 @@ async function createCompletedOrder(pendingOrderData, paymentDetails) {
             updated_at: admin.firestore.FieldValue.serverTimestamp()
         };
 
-        // ---------------------------------------------------------
-        // DUPLICATE PROTECTION
-        // ---------------------------------------------------------
-        // Use the Yoco checkout ID as the Firestore document ID.
-        // This makes the operation idempotent: the same checkout
-        // can only create one order.
-        const orderRef = db.collection('orders').doc(`yoco_${checkoutId}`);
+        // Use checkout ID as the permanent order document ID.
+        // This gives us built-in duplicate protection.
+        const orderId = `yoco_${pendingOrderData.yoco_checkout_id}`;
 
-        let orderCreated = false;
+        // Check whether this order already exists
+        const existingOrder = await db.collection('orders').doc(orderId).get();
 
-        // Atomically check/create the order.
-        // If the webhook and browser success route arrive at almost
-        // exactly the same time, only one of them can create it.
-        await db.runTransaction(async (transaction) => {
-            const existingOrder = await transaction.get(orderRef);
-
-            if (existingOrder.exists) {
-                console.log(
-                    `Duplicate payment prevented — order already exists: ${orderRef.id}`
-                );
-                return;
-            }
-
-            transaction.set(orderRef, orderData);
-            orderCreated = true;
-        });
-
-        // ---------------------------------------------------------
-        // ALREADY COMPLETED
-        // ---------------------------------------------------------
-        if (!orderCreated) {
-            return orderRef.id;
+        if (existingOrder.exists) {
+            console.log(`Duplicate payment prevented — order already exists: ${orderId}`);
+            return orderId;
         }
 
-        console.log(`New completed order created: ${orderRef.id}`);
+        // Create the completed order
+        await db.collection('orders').doc(orderId).set(orderData);
 
-        // ---------------------------------------------------------
-        // UPDATE PRODUCT STOCK
-        // ---------------------------------------------------------
+        console.log(`New completed order created: ${orderId}`);
+
+        // Update product stock
         if (orderData.items && Array.isArray(orderData.items)) {
             const batch = db.batch();
 
@@ -579,8 +547,7 @@ async function createCompletedOrder(pendingOrderData, paymentDetails) {
 
                         batch.update(productRef, {
                             stock: Math.max(0, newStock),
-                            updated_at:
-                                admin.firestore.FieldValue.serverTimestamp()
+                            updated_at: admin.firestore.FieldValue.serverTimestamp()
                         });
                     }
                 }
@@ -589,6 +556,19 @@ async function createCompletedOrder(pendingOrderData, paymentDetails) {
             await batch.commit();
             console.log('Product stock updated');
         }
+
+        // Send WhatsApp notification
+        await sendWhatsAppNotification(orderData, 'completed');
+
+        console.log(`Created completed order: ${orderId}`);
+
+        return orderId;
+
+    } catch (error) {
+        console.error('Error creating completed order:', error);
+        throw error;
+    }
+}
 
         // ---------------------------------------------------------
         // SEND WHATSAPP — ONLY FOR THE FIRST CREATION
