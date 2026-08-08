@@ -601,9 +601,11 @@ async function createCompletedOrder(pendingOrderData, paymentDetails) {
             'completed'
         );
 
-        console.log(`Created completed order: ${orderRef.id}`);
+        // Send WhatsApp notification
+        await sendWhatsAppNotification(orderData, 'completed');
 
-        return orderRef.id;
+        console.log(`Created completed order: ${orderId}`);
+        return orderId;
 
     } catch (error) {
         console.error('Error creating completed order:', error);
