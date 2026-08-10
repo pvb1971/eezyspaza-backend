@@ -117,6 +117,30 @@ try {
 
 console.log('Twilio client status:', twilioClient ? 'Ready' : 'Not configured');
 
+const nodemailer = require('nodemailer');
+
+let mailTransporter = null;
+try {
+    if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
+        mailTransporter = nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+                user: process.env.GMAIL_USER,
+                pass: process.env.GMAIL_APP_PASSWORD
+            }
+        });
+        console.log('✅ Email transporter configured');
+    } else {
+        console.warn('⚠️ GMAIL_USER/GMAIL_APP_PASSWORD not set — daily email report disabled');
+    }
+} catch (mailError) {
+    console.error('❌ Email transporter initialization failed:', mailError.message);
+}
+
+const DAILY_REPORT_RECIPIENT = 'petersapprojects@gmail.com';
+
+
+
 // ============================================
 // PRODUCT MANAGEMENT ENDPOINTS
 // ============================================
@@ -695,6 +719,138 @@ async function completeOrderFromCheckoutId(checkoutId, paymentDetails, sourceLab
 
     return orderId;
 }
+
+// South Africa Standard Time is a constant UTC+2 offset (no DST),
+// so we can compute day boundaries with a fixed offset string.
+function getSASTDayRange(dateStr) {
+    const start = new Date(`${dateStr}T00:00:00+02:00`);
+    const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+    return { start, end };
+}
+
+// Returns today's date as YYYY-MM-DD, in SAST.
+function todaySAST() {
+    const sastNow = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    return sastNow.toISOString().slice(0, 10);
+}
+
+// Returns yesterday's date as YYYY-MM-DD, in SAST.
+function yesterdaySAST() {
+    const sastNow = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    const y = new Date(sastNow.getTime() - 24 * 60 * 60 * 1000);
+    return y.toISOString().slice(0, 10);
+}
+
+async function getOrdersForDate(dateStr) {
+    const { start, end } = getSASTDayRange(dateStr);
+
+    const snapshot = await db.collection('orders')
+        .where('created_at', '>=', admin.firestore.Timestamp.fromDate(start))
+        .where('created_at', '<', admin.firestore.Timestamp.fromDate(end))
+        .orderBy('created_at', 'desc')
+        .get();
+
+    const orders = [];
+    snapshot.forEach(doc => orders.push({ id: doc.id, ...doc.data() }));
+    return orders;
+}
+
+function buildDailySummary(date, orders) {
+    const byStatus = {};
+    let totalRevenue = 0;
+    let completedRevenue = 0;
+
+    orders.forEach(order => {
+        const status = order.status || 'unknown';
+        byStatus[status] = (byStatus[status] || 0) + 1;
+
+        const amount = order.amount_display ??
+            ((order.amount_cents || order.amount || 0) / 100);
+
+        totalRevenue += amount;
+
+        if (status === 'completed' || status === 'delivered') {
+            completedRevenue += amount;
+        }
+    });
+
+    return {
+        date,
+        totalOrders: orders.length,
+        byStatus,
+        totalRevenue: Number(totalRevenue.toFixed(2)),
+        completedRevenue: Number(completedRevenue.toFixed(2)),
+        generatedAt: new Date().toISOString()
+    };
+}
+
+async function archiveDailyReport(date, summary, orders) {
+    // Slim order list — enough detail to review later without
+    // bloating the archived document.
+    const orderSnapshot = orders.map(order => ({
+        id: order.id,
+        customer: order.customer_info?.customer_name ||
+            order.metadata?.customer_name || 'Unknown',
+        total: order.amount_display ??
+            ((order.amount_cents || order.amount || 0) / 100),
+        status: order.status || 'unknown'
+    }));
+
+    await db.collection('dailyReports').doc(date).set({
+        ...summary,
+        orders: orderSnapshot
+    });
+
+    console.log(`[daily-report] Archived ${date} to Firestore (dailyReports/${date})`);
+}
+
+async function sendDailyReportEmail(summary) {
+    if (!mailTransporter) {
+        console.warn('[daily-report] Email not configured — skipping send');
+        return;
+    }
+
+    const statusRows = Object.entries(summary.byStatus)
+        .map(([status, count]) => `<tr><td>${status}</td><td>${count}</td></tr>`)
+        .join('');
+
+    const html = `
+        <div style="font-family: Arial, sans-serif; max-width: 500px;">
+            <h2>EezySpaza Daily Report — ${summary.date}</h2>
+            <p><strong>Total Orders:</strong> ${summary.totalOrders}</p>
+            <p><strong>Total Revenue (all orders):</strong> R${summary.totalRevenue.toFixed(2)}</p>
+            <p><strong>Completed/Delivered Revenue:</strong> R${summary.completedRevenue.toFixed(2)}</p>
+            <h3>Breakdown by Status</h3>
+            <table border="1" cellpadding="6" cellspacing="0" style="border-collapse: collapse;">
+                <tr style="background:#f3f4f6;"><th>Status</th><th>Count</th></tr>
+                ${statusRows || '<tr><td colspan="2">No orders today</td></tr>'}
+            </table>
+            <p style="color:#888; font-size:12px; margin-top: 20px;">
+                Generated automatically at ${summary.generatedAt}
+            </p>
+        </div>
+    `;
+
+    await mailTransporter.sendMail({
+        from: `"EezySpaza Reports" <${process.env.GMAIL_USER}>`,
+        to: DAILY_REPORT_RECIPIENT,
+        subject: `EezySpaza Daily Report — ${summary.date}`,
+        html
+    });
+
+    console.log(`[daily-report] ✅ Email sent for ${summary.date} to ${DAILY_REPORT_RECIPIENT}`);
+}
+
+async function generateAndSendDailyReport(date) {
+    console.log(`[daily-report] Generating report for ${date}`);
+    const orders = await getOrdersForDate(date);
+    const summary = buildDailySummary(date, orders);
+    await archiveDailyReport(date, summary, orders);
+    await sendDailyReportEmail(summary);
+    console.log(`[daily-report] Done for ${date}`);
+    return summary;
+}
+
 
 // ============================================
 // PAYMENT ENDPOINTS
@@ -1416,6 +1572,78 @@ app.get('/admin/pending-payments', async (req, res) => {
     }
 });
 
+// Today's orders only (SAST calendar day)
+app.get('/admin/orders/today', async (req, res) => {
+    try {
+        const date = todaySAST();
+        const orders = await getOrdersForDate(date);
+        res.json({ success: true, date, count: orders.length, orders });
+    } catch (error) {
+        console.error('Error fetching today\'s orders:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Orders for any specific past day, e.g. /admin/orders/by-date/2026-08-09
+app.get('/admin/orders/by-date/:date', async (req, res) => {
+    try {
+        const { date } = req.params;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid date format, use YYYY-MM-DD'
+            });
+        }
+        const orders = await getOrdersForDate(date);
+        res.json({ success: true, date, count: orders.length, orders });
+    } catch (error) {
+        console.error('Error fetching orders by date:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// List archived daily report summaries, most recent first
+app.get('/admin/daily-reports', async (req, res) => {
+    try {
+        const days = Math.min(parseInt(req.query.days) || 7, 30);
+        const snapshot = await db.collection('dailyReports')
+            .orderBy('date', 'desc')
+            .limit(days)
+            .get();
+
+        const reports = [];
+        snapshot.forEach(doc => reports.push({ id: doc.id, ...doc.data() }));
+
+        res.json({ success: true, count: reports.length, reports });
+    } catch (error) {
+        console.error('Error fetching daily reports:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Manual trigger — generates + archives + emails a report on demand.
+// Defaults to yesterday (matches what the automatic midnight job does).
+// Useful for testing without waiting for midnight, e.g.:
+//   POST /admin/daily-report/run           -> yesterday
+//   POST /admin/daily-report/run/2026-08-09 -> specific date
+app.post('/admin/daily-report/run/:date?', async (req, res) => {
+    try {
+        const date = req.params.date || yesterdaySAST();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid date format, use YYYY-MM-DD'
+            });
+        }
+        const summary = await generateAndSendDailyReport(date);
+        res.json({ success: true, summary });
+    } catch (error) {
+        console.error('Manual daily report error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+
 app.get("/health", (req, res) => res.json({ status: "ok", timestamp: new Date().toISOString() }));
 
 // Diagnostic endpoint: checks API key format, Firebase connectivity, and
@@ -1538,3 +1766,33 @@ setInterval(async () => {
 }, KEEP_ALIVE_MS);
 
 console.log(`[keep-alive] Self-ping active every 10 min → ${SELF_URL}/health`);
+
+// ─── Daily report scheduler ────────────────────────────────────────────────
+// Checks every 5 minutes whether it's just past midnight SAST and, if so
+// (and it hasn't already run today), archives yesterday's orders and emails
+// the summary. This relies on the keep-alive ping above to keep the server
+// awake through midnight — if the server were allowed to sleep, this
+// interval wouldn't fire on schedule.
+let lastDailyReportRunDate = null;
+
+async function checkAndRunDailyReport() {
+    try {
+        const sastNow = new Date(Date.now() + 2 * 60 * 60 * 1000);
+        const hour = sastNow.getUTCHours();
+        const minute = sastNow.getUTCMinutes();
+        const todayStr = sastNow.toISOString().slice(0, 10);
+
+        // Run once, in the first 10 minutes after midnight SAST
+        if (hour === 0 && minute < 10 && lastDailyReportRunDate !== todayStr) {
+            lastDailyReportRunDate = todayStr;
+            const dateToReport = yesterdaySAST();
+            await generateAndSendDailyReport(dateToReport);
+        }
+    } catch (err) {
+        console.error('[daily-report] Scheduled run failed:', err);
+    }
+}
+
+setInterval(checkAndRunDailyReport, 5 * 60 * 1000);
+console.log('[daily-report] Scheduler active — checks every 5 min for midnight SAST rollover');
+
